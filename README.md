@@ -1,6 +1,6 @@
-# Coding Agent
+# Expert Agent
 
-一个用 Python 实现的 Coding Agent，灵感来自 Claude Code / Aider。
+基于专家概念的Agent，支持coding和work，面向实际部署的agent，每次部署就定一个专家，一个专家负责一个工作岗位
 
 ## 特性
 
