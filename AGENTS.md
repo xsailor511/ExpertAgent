@@ -49,6 +49,9 @@ coding-agent/
 3. **沙箱层**（`src/coding_agent/sandbox/`）：沙箱实现（本地、docker、e2b）必须实现 `sandbox/base.py` 中定义的基础沙箱接口。
 4. **权限控制**（`src/coding_agent/permissions/`）：所有文件修改和 bash 执行都必须通过权限策略层。
 
+## 纪律
+- **回复语言**：所有回复使用中文（代码注释和日志可保留英文）
+
 ## 编码规范
 - **语言**：Python 3.11+
 - **格式化**：使用 `ruff format`（双引号，行长度 100）

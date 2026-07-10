@@ -5,6 +5,12 @@ from __future__ import annotations
 from typing import Optional
 
 from coding_agent.config import Settings, get_settings
+from coding_agent.core.hooks import (
+    HookEvent,
+    HookRegistry,
+    build_log_hook,
+    build_permission_hook,
+)
 from coding_agent.core.loop import AgentLoop
 from coding_agent.core.memory import Memory
 from coding_agent.core.session import Session
@@ -54,12 +60,15 @@ class Agent:
         self.session = session
         self.ui = ui
         self.permissions = permissions
+        self.hooks = HookRegistry()
+        self.hooks.register(HookEvent.PRE_TOOL_USE, build_log_hook(log))
         self.loop = AgentLoop(
             llm=llm,
             tools=tools,
             memory=memory,
             ui=ui,
             permissions=permissions,
+            hooks=self.hooks,
         )
 
     @classmethod
@@ -79,7 +88,7 @@ class Agent:
         ui = TerminalUI()
         permissions = PermissionPolicy(mode=settings.permission, ui=ui)
 
-        return cls(
+        agent = cls(
             settings=settings,
             llm=llm,
             tools=tools,
@@ -88,6 +97,10 @@ class Agent:
             ui=ui,
             permissions=permissions,
         )
+        agent.hooks.register(
+            HookEvent.PRE_TOOL_USE, build_permission_hook(permissions)
+        )
+        return agent
 
     async def run(self, user_input: str) -> str:
         """执行一轮对话。"""

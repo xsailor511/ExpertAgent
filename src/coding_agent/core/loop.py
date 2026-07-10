@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from coding_agent.core.hooks import HookEvent, HookRegistry
 from coding_agent.llm.base import LLMProvider, Message, StreamChunk
 from coding_agent.llm.streaming import StreamAggregator
 from coding_agent.permissions.policy import PermissionPolicy
@@ -28,17 +29,25 @@ class AgentLoop:
         memory: Any,  # Memory 实例
         ui: TerminalUI,
         permissions: PermissionPolicy,
+        hooks: HookRegistry | None = None,
     ) -> None:
         self.llm = llm
         self.tools = tools
         self.memory = memory
         self.ui = ui
         self.permissions = permissions
+        self.hooks = hooks
 
     async def run(self, user_input: str) -> str:
         """执行一轮完整对话。"""
         # 加入用户消息
         self.memory.add_user(user_input)
+
+        # Hook: USER_PROMPT_SUBMIT
+        if self.hooks:
+            await self.hooks.trigger(
+                HookEvent.USER_PROMPT_SUBMIT, user_input=user_input
+            )
 
         tool_schemas = self.tools.schemas()
         final_response = ""
@@ -89,6 +98,10 @@ class AgentLoop:
             final_response = "达到最大工具调用次数，未找到最终答案。"
             self.ui.print_warning(final_response)
 
+        # Hook: STOP
+        if self.hooks:
+            await self.hooks.trigger(HookEvent.STOP)
+
         return final_response
 
     async def _execute_tool_call(self, tc: Any) -> None:
@@ -99,6 +112,19 @@ class AgentLoop:
             self.ui.print_tool_error(tc.name, tc.arguments, result_text)
             self.memory.add_tool(tc.id, tc.name, result_text)
             return
+
+        # Hook: PRE_TOOL_USE (在权限检查之前)
+        if self.hooks:
+            blocked = await self.hooks.trigger(
+                HookEvent.PRE_TOOL_USE,
+                block_name=tc.name,
+                block_input=tc.arguments,
+            )
+            if blocked:
+                result_text = f"工具调用 '{tc.name}' 被 hook 阻止: {blocked}"
+                self.ui.print_tool_rejected(tc.name, tc.arguments)
+                self.memory.add_tool(tc.id, tc.name, result_text)
+                return
 
         # 权限检查
         approved = True
@@ -126,3 +152,11 @@ class AgentLoop:
 
         # 记录到 memory
         self.memory.add_tool(tc.id, tc.name, result.content)
+
+        # Hook: POST_TOOL_USE
+        if self.hooks:
+            await self.hooks.trigger(
+                HookEvent.POST_TOOL_USE,
+                block_name=tc.name,
+                result=result,
+            )
