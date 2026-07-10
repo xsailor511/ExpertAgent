@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Optional
-
 from coding_agent.config import Settings, get_settings
+from coding_agent.core.background import BackgroundTaskManager
 from coding_agent.core.hooks import (
     HookEvent,
     HookRegistry,
@@ -54,6 +53,7 @@ class Agent:
         session: Session,
         ui: TerminalUI,
         permissions: PermissionPolicy,
+        bg_manager: BackgroundTaskManager | None = None,
     ) -> None:
         self.settings = settings
         self.llm = llm
@@ -62,6 +62,7 @@ class Agent:
         self.session = session
         self.ui = ui
         self.permissions = permissions
+        self.bg_manager = bg_manager
         self.hooks = HookRegistry()
         self.hooks.register(HookEvent.PRE_TOOL_USE, build_log_hook(log))
         self.recovery_state = RecoveryState(primary=settings.model)
@@ -73,10 +74,11 @@ class Agent:
             permissions=permissions,
             hooks=self.hooks,
             recovery_state=self.recovery_state,
+            bg_manager=self.bg_manager,
         )
 
     @classmethod
-    def from_settings(cls, settings: Optional[Settings] = None) -> "Agent":
+    def from_settings(cls, settings: Settings | None = None) -> Agent:
         """从配置创建 Agent。"""
         settings = settings or get_settings()
         setup_logging(settings.log_level)
@@ -94,6 +96,7 @@ class Agent:
         session = Session(workdir=settings.workdir)
         ui = TerminalUI()
         permissions = PermissionPolicy(mode=settings.permission, ui=ui)
+        bg_manager = BackgroundTaskManager()
 
         agent = cls(
             settings=settings,
@@ -103,6 +106,7 @@ class Agent:
             session=session,
             ui=ui,
             permissions=permissions,
+            bg_manager=bg_manager,
         )
         agent.hooks.register(
             HookEvent.PRE_TOOL_USE, build_permission_hook(permissions)

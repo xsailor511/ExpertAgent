@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from coding_agent.core.background import BackgroundTaskManager, _exec_command, is_slow
 from coding_agent.core.compaction import estimate_size, micro_compact, snip_compact
 from coding_agent.core.hooks import HookEvent, HookRegistry
 from coding_agent.core.recovery import RecoveryState, with_retry
@@ -35,6 +36,7 @@ class AgentLoop:
         recovery_state: RecoveryState | None = None,
         default_max_tokens: int = 8000,
         escalated_max_tokens: int = 16000,
+        bg_manager: BackgroundTaskManager | None = None,
     ) -> None:
         self.llm = llm
         self.tools = tools
@@ -45,6 +47,7 @@ class AgentLoop:
         self.recovery_state = recovery_state or RecoveryState(primary="")
         self.default_max_tokens = default_max_tokens
         self.escalated_max_tokens = escalated_max_tokens
+        self.bg_manager = bg_manager
 
     async def run(self, user_input: str) -> str:
         """执行一轮完整对话。"""
@@ -55,6 +58,11 @@ class AgentLoop:
 
         # 2. 加入用户消息
         self.memory.add_user(user_input)
+
+        # 2.5 收集后台任务结果
+        if self.bg_manager:
+            for note in self.bg_manager.collect_results():
+                self.memory.add_user(note)
 
         tool_schemas = self.tools.schemas()
         max_tokens = self.default_max_tokens
@@ -188,6 +196,15 @@ class AgentLoop:
 
         # 显示工具调用
         self.ui.print_tool_call(tc.name, tc.arguments)
+
+        # 后台任务拦截：对慢速 bash 命令在后台执行
+        if tc.name == "bash" and self.bg_manager:
+            command = tc.arguments.get("command", "")
+            if is_slow(command):
+                placeholder = self.bg_manager.start(command, lambda: _exec_command(command))
+                self.ui.print_tool_result(tc.name, placeholder, is_error=False)
+                self.memory.add_tool(tc.id, tc.name, placeholder)
+                return
 
         # 执行
         result = await self.tools.execute(tc.name, tc.arguments, approved=approved)
