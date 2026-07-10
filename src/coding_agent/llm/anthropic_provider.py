@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import json
-from typing import Any, AsyncIterator, Optional
+from collections.abc import AsyncIterator
+from typing import Any
 
 from coding_agent.llm.base import (
     LLMProvider,
@@ -17,7 +18,6 @@ from coding_agent.utils.logging import get_logger
 log = get_logger(__name__)
 
 try:
-    import anthropic
     from anthropic import AsyncAnthropic
 
     HAS_ANTHROPIC = True
@@ -37,8 +37,8 @@ class AnthropicProvider(LLMProvider):
     def __init__(
         self,
         model: str,
-        api_key: Optional[str] = None,
-        base_url: Optional[str] = None,
+        api_key: str | None = None,
+        base_url: str | None = None,
         **kwargs: Any,
     ) -> None:
         if not HAS_ANTHROPIC:
@@ -56,9 +56,9 @@ class AnthropicProvider(LLMProvider):
     async def chat(
         self,
         messages: list[Message],
-        tools: Optional[list[dict[str, Any]]] = None,
+        tools: list[dict[str, Any]] | None = None,
         temperature: float = 0.0,
-        max_tokens: Optional[int] = None,
+        max_tokens: int | None = None,
     ) -> LLMResponse:
         kwargs = self._build_kwargs(messages, tools, temperature, max_tokens)
         response = await self.client.messages.create(**kwargs)
@@ -67,9 +67,9 @@ class AnthropicProvider(LLMProvider):
     async def stream(
         self,
         messages: list[Message],
-        tools: Optional[list[dict[str, Any]]] = None,
+        tools: list[dict[str, Any]] | None = None,
         temperature: float = 0.0,
-        max_tokens: Optional[int] = None,
+        max_tokens: int | None = None,
     ) -> AsyncIterator[StreamChunk]:
         kwargs = self._build_kwargs(messages, tools, temperature, max_tokens)
         kwargs["stream"] = True
@@ -122,9 +122,9 @@ class AnthropicProvider(LLMProvider):
     def _build_kwargs(
         self,
         messages: list[Message],
-        tools: Optional[list[dict[str, Any]]],
+        tools: list[dict[str, Any]] | None,
         temperature: float,
-        max_tokens: Optional[int],
+        max_tokens: int | None,
     ) -> dict[str, Any]:
         kwargs: dict[str, Any] = {
             "model": self.model,
@@ -241,10 +241,11 @@ class AnthropicProvider(LLMProvider):
 
         usage = {}
         if hasattr(response, "usage"):
-            usage = {
-                "prompt_tokens": response.usage.input_tokens if hasattr(response.usage, "input_tokens") else 0,
-                "completion_tokens": response.usage.output_tokens if hasattr(response.usage, "output_tokens") else 0,
-            }
+            usage = {}
+            if hasattr(response.usage, "input_tokens"):
+                usage["prompt_tokens"] = response.usage.input_tokens
+            if hasattr(response.usage, "output_tokens"):
+                usage["completion_tokens"] = response.usage.output_tokens
 
         return LLMResponse(
             content=content_str,

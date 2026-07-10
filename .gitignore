@@ -37,3 +37,4 @@ Thumbs.db
 # Project
 *.log
 .coding_agent/
+.transcripts/
