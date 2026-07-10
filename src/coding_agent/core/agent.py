@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from coding_agent.config import Settings, get_settings
 from coding_agent.core.background import BackgroundTaskManager
+from coding_agent.core.cron import CronScheduler
 from coding_agent.core.hooks import (
     HookEvent,
     HookRegistry,
@@ -54,6 +55,7 @@ class Agent:
         ui: TerminalUI,
         permissions: PermissionPolicy,
         bg_manager: BackgroundTaskManager | None = None,
+        cron_scheduler: CronScheduler | None = None,
     ) -> None:
         self.settings = settings
         self.llm = llm
@@ -63,6 +65,7 @@ class Agent:
         self.ui = ui
         self.permissions = permissions
         self.bg_manager = bg_manager
+        self.cron = cron_scheduler
         self.hooks = HookRegistry()
         self.hooks.register(HookEvent.PRE_TOOL_USE, build_log_hook(log))
         self.recovery_state = RecoveryState(primary=settings.model)
@@ -75,6 +78,7 @@ class Agent:
             hooks=self.hooks,
             recovery_state=self.recovery_state,
             bg_manager=self.bg_manager,
+            cron_scheduler=self.cron,
         )
 
     @classmethod
@@ -97,6 +101,8 @@ class Agent:
         ui = TerminalUI()
         permissions = PermissionPolicy(mode=settings.permission, ui=ui)
         bg_manager = BackgroundTaskManager()
+        cron_scheduler = CronScheduler()
+        cron_scheduler.start()
 
         agent = cls(
             settings=settings,
@@ -107,6 +113,7 @@ class Agent:
             ui=ui,
             permissions=permissions,
             bg_manager=bg_manager,
+            cron_scheduler=cron_scheduler,
         )
         agent.hooks.register(
             HookEvent.PRE_TOOL_USE, build_permission_hook(permissions)
@@ -127,5 +134,7 @@ class Agent:
 
     async def close(self) -> None:
         """释放资源。"""
+        if self.cron:
+            self.cron.stop()
         await self.llm.close()
         await self.session.close()

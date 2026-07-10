@@ -7,6 +7,7 @@ from typing import Any
 
 from coding_agent.core.background import BackgroundTaskManager, _exec_command, is_slow
 from coding_agent.core.compaction import estimate_size, micro_compact, snip_compact
+from coding_agent.core.cron import CronScheduler
 from coding_agent.core.hooks import HookEvent, HookRegistry
 from coding_agent.core.recovery import RecoveryState, with_retry
 from coding_agent.llm.base import LLMProvider, LLMResponse
@@ -37,6 +38,7 @@ class AgentLoop:
         default_max_tokens: int = 8000,
         escalated_max_tokens: int = 16000,
         bg_manager: BackgroundTaskManager | None = None,
+        cron_scheduler: CronScheduler | None = None,
     ) -> None:
         self.llm = llm
         self.tools = tools
@@ -48,6 +50,7 @@ class AgentLoop:
         self.default_max_tokens = default_max_tokens
         self.escalated_max_tokens = escalated_max_tokens
         self.bg_manager = bg_manager
+        self.cron = cron_scheduler
 
     async def run(self, user_input: str) -> str:
         """执行一轮完整对话。"""
@@ -59,10 +62,13 @@ class AgentLoop:
         # 2. 加入用户消息
         self.memory.add_user(user_input)
 
-        # 2.5 收集后台任务结果
+        # 2.5 收集后台任务结果 + cron 触发任务
         if self.bg_manager:
             for note in self.bg_manager.collect_results():
                 self.memory.add_user(note)
+        if self.cron:
+            for prompt in self.cron.pop_fired():
+                self.memory.add_user(f"[Scheduled] {prompt}")
 
         tool_schemas = self.tools.schemas()
         max_tokens = self.default_max_tokens
