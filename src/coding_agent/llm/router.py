@@ -50,12 +50,21 @@ def create_llm(
             base_url=settings.base_url or "https://open.bigmodel.cn/api/paas/v4",
         )
     elif provider_name == "anthropic":
-        # 简化：走 OpenAI 兼容层 (实际项目可接 anthropic 原生 SDK)
-        return OpenAIProvider(
-            model=model_name,
-            api_key=settings.anthropic_api_key or settings.api_key,
-            base_url=settings.base_url,
-        )
+        try:
+            from coding_agent.llm.anthropic_provider import AnthropicProvider
+
+            return AnthropicProvider(
+                model=model_name,
+                api_key=settings.anthropic_api_key or settings.api_key,
+                base_url=settings.base_url,
+            )
+        except ImportError:
+            log.warning("anthropic SDK not installed, falling back to OpenAI provider")
+            return OpenAIProvider(
+                model=model_name,
+                api_key=settings.anthropic_api_key or settings.api_key,
+                base_url=settings.base_url,
+            )
     elif provider_name == "litellm":
         try:
             from coding_agent.llm.litellm_provider import LiteLLMProvider
