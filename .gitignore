@@ -38,3 +38,6 @@ Thumbs.db
 *.log
 .coding_agent/
 .transcripts/
+.tasks/
+.scheduled_tasks.json
+.mailboxes/
