@@ -34,7 +34,6 @@ class CompletableInput(Input):
 
 
 def _summarize_args(name: str, arguments: dict[str, Any]) -> str:
-    """Generate a one-line summary of tool arguments."""
     if name == "bash":
         cmd = arguments.get("command", "")
         return cmd[:80] + "..." if len(cmd) > 80 else cmd
@@ -47,29 +46,33 @@ def _summarize_args(name: str, arguments: dict[str, Any]) -> str:
     return json.dumps(arguments, ensure_ascii=False)[:80]
 
 
+def _summarize_result(name: str, result: str) -> str:
+    if len(result) <= 300:
+        return result
+    return result[:300] + f"\n... ({len(result)} chars total)"
+
+
 class TextualUIAdapter(TerminalUI):
-    """Textual UI adapter that captures streaming output and updates the TUI."""
+    """Textual UI adapter — drives the TUI from the agent loop."""
 
     def __init__(self, app_instance: CodingAgentApp):
         super().__init__()
         self.app = app_instance
         self._is_streaming = False
         self._buffer = ""
+        self._has_content = False
         self.assistant_bubble: Static | None = None
         self.msg_wrapper: Container | None = None
-        self._bubble_created = False
 
     def _create_bubble_sync(self) -> None:
-        if self._bubble_created:
+        if self.assistant_bubble is not None:
             return
         try:
             self.assistant_bubble = Static("", classes="assistant-bubble")
             self.msg_wrapper = Container(
                 self.assistant_bubble, classes="message-wrapper message-assistant"
             )
-            chat_container = self.app.chat_container
-            chat_container.mount(self.msg_wrapper)
-            self._bubble_created = True
+            self.app.chat_container.mount(self.msg_wrapper)
         except Exception:
             pass
 
@@ -79,15 +82,17 @@ class TextualUIAdapter(TerminalUI):
     def start_assistant_stream(self) -> None:
         self._buffer = ""
         self._is_streaming = True
-        self._bubble_created = False
-        self._create_bubble_sync()
+        self._has_content = False
+        self.assistant_bubble = None
+        self.msg_wrapper = None
         self.app.thinking_label.update("🤔 Thinking...")
         self.app.info_status.update("Status: streaming")
 
     def update_assistant_stream(self, chunk: str) -> None:
         if not self._is_streaming:
             return
-        if not self._bubble_created:
+        if not self._has_content:
+            self._has_content = True
             self._create_bubble_sync()
         if self.assistant_bubble is None:
             return
@@ -95,8 +100,8 @@ class TextualUIAdapter(TerminalUI):
         self.assistant_bubble.update(self._buffer)
         self.assistant_bubble.refresh(layout=True)
         try:
-            scroll_view = self.app.query_one("#chat-area", ScrollableContainer)
-            scroll_view.scroll_end(animate=False)
+            sv = self.app.query_one("#chat-area", ScrollableContainer)
+            sv.scroll_end(animate=False)
         except Exception:
             pass
         self.app.input.focus()
@@ -104,11 +109,12 @@ class TextualUIAdapter(TerminalUI):
 
     def end_assistant_stream(self) -> None:
         self._is_streaming = False
-        self._bubble_created = False
-        display_text = self._buffer if self._buffer else "(no content)"
-        if self.assistant_bubble is not None:
-            self.assistant_bubble.update(display_text)
+        if self._has_content and self.assistant_bubble is not None:
+            display = self._buffer if self._buffer else "(no content)"
+            self.assistant_bubble.update(display)
             self.assistant_bubble.refresh(layout=True)
+        self.assistant_bubble = None
+        self.msg_wrapper = None
         self.app.thinking_label.update("Ready")
         self.app.info_status.update("Status: processing")
         self.app.input.focus()
@@ -116,18 +122,27 @@ class TextualUIAdapter(TerminalUI):
 
     def print_tool_call(self, name: str, arguments: dict[str, Any]) -> None:
         summary = _summarize_args(name, arguments)
+        self.app._add_item("tool", f"🔧 {name}  {summary}")
         self.app._add_activity(name, summary, "running")
         self.app.info_status.update(f"Status: ⚡ {name}")
 
     def print_tool_result(self, name: str, result: str, *, is_error: bool = False) -> None:
+        if result:
+            display = _summarize_result(name, result)
+            kind = "tool-error" if is_error else "tool-result"
+            self.app._add_item(kind, display)
         self.app._update_activity(name, "failed" if is_error else "completed")
         self.app.info_status.update(f"Status: {'❌' if is_error else '✅'} {name}")
 
     def print_tool_error(self, name: str, arguments: dict[str, Any], error: str) -> None:
-        self.app._add_activity(name, _summarize_args(name, arguments), "failed")
+        summary = _summarize_args(name, arguments)
+        self.app._add_item("tool", f"🔧 {name}  {summary}  ❌ {error[:120]}")
+        self.app._add_activity(name, summary, "failed")
 
     def print_tool_rejected(self, name: str, arguments: dict[str, Any]) -> None:
-        self.app._add_activity(name, _summarize_args(name, arguments), "cancelled")
+        summary = _summarize_args(name, arguments)
+        self.app._add_item("tool", f"🚫 {name}  {summary}  rejected")
+        self.app._add_activity(name, summary, "cancelled")
 
     def print_info(self, msg: str) -> None:
         self.app.thinking_label.update(msg)
@@ -136,21 +151,32 @@ class TextualUIAdapter(TerminalUI):
         self.app.thinking_label.update(f"⚠ {msg}")
 
     def print_error(self, msg: str) -> None:
-        self.app.thinking_label.update(f"✖ {msg}")
+        self.app._add_item("error", f"✖ {msg}")
         self.app.info_status.update("Status: error")
 
     def print_success(self, msg: str) -> None:
         self.app.thinking_label.update(f"✔ {msg}")
 
 
+ITEMS = {
+    "user":        ("user-bubble",         "message-user"),
+    "assistant":   ("assistant-bubble",    "message-assistant"),
+    "tool":        ("tool-bubble",         "message-tool"),
+    "tool-result": ("tool-result-bubble",  "message-tool-result"),
+    "tool-error":  ("tool-error-bubble",   "message-tool-error"),
+    "error":       ("error-bubble",        "message-error"),
+}
+
+
 class CodingAgentApp(App):
-    """Main TUI application class - Claude Code style."""
+    """Main TUI application class – multi-type item list."""
 
     CSS = """
     Screen {
         background: #1e1e2e;
     }
 
+    /* ── Chat area ── */
     #chat-area {
         height: 1fr;
         margin: 1 2 0 2;
@@ -169,16 +195,7 @@ class CodingAgentApp(App):
         height: auto;
     }
 
-    .message-user {
-        align: left middle;
-        height: auto;
-    }
-
-    .message-assistant {
-        align: left middle;
-        height: auto;
-    }
-
+    /* ── User messages ── */
     .user-bubble {
         background: transparent;
         color: #89b4fa;
@@ -188,6 +205,7 @@ class CodingAgentApp(App):
         height: auto;
     }
 
+    /* ── Assistant messages ── */
     .assistant-bubble {
         background: transparent;
         color: #cdd6f4;
@@ -198,6 +216,50 @@ class CodingAgentApp(App):
         min-height: 1;
     }
 
+    /* ── Tool invocations ── */
+    .tool-bubble {
+        background: transparent;
+        color: #fab387;
+        padding: 0 1;
+        border-left: solid #fab387;
+        width: 100%;
+        height: auto;
+    }
+
+    /* ── Tool results (success) ── */
+    .tool-result-bubble {
+        background: transparent;
+        color: #585b70;
+        padding: 0 1 0 2;
+        border-left: solid #585b70;
+        width: 100%;
+        height: auto;
+        min-height: 1;
+    }
+
+    /* ── Tool results (error) ── */
+    .tool-error-bubble {
+        background: transparent;
+        color: #f38ba8;
+        padding: 0 1 0 2;
+        border-left: solid #f38ba8;
+        width: 100%;
+        height: auto;
+        min-height: 1;
+    }
+
+    /* ── Error messages ── */
+    .error-bubble {
+        background: transparent;
+        color: #f38ba8;
+        padding: 1 1;
+        border-left: solid #f38ba8;
+        width: 100%;
+        height: auto;
+        min-height: 1;
+    }
+
+    /* ── Thinking label ── */
     #thinking-label {
         height: 1;
         margin: 0 2;
@@ -205,7 +267,7 @@ class CodingAgentApp(App):
         padding: 0;
     }
 
-    /* Activity panel */
+    /* ── Activity panel ── */
     #activity-panel {
         height: auto;
         max-height: 6;
@@ -226,22 +288,12 @@ class CodingAgentApp(App):
         color: #585b70;
     }
 
-    .activity-entry.running {
-        color: #f9e2af;
-    }
+    .activity-entry.running  { color: #f9e2af; }
+    .activity-entry.completed { color: #585b70; }
+    .activity-entry.failed    { color: #f38ba8; }
+    .activity-entry.cancelled { color: #6c7086; }
 
-    .activity-entry.completed {
-        color: #585b70;
-    }
-
-    .activity-entry.failed {
-        color: #f38ba8;
-    }
-
-    .activity-entry.cancelled {
-        color: #6c7086;
-    }
-
+    /* ── Suggestions ── */
     #suggestion-list {
         display: none;
         height: auto;
@@ -256,6 +308,7 @@ class CodingAgentApp(App):
         background: #313244;
     }
 
+    /* ── Input area ── */
     #input-area {
         height: 3;
         margin: 0 2;
@@ -275,6 +328,7 @@ class CodingAgentApp(App):
         border: tall #89b4fa;
     }
 
+    /* ── Info row ── */
     #info-row {
         height: 1;
         margin: 1 2 1 2;
@@ -291,6 +345,7 @@ class CodingAgentApp(App):
         margin-right: 0;
     }
 
+    /* ── Header ── */
     Header {
         background: #1e1e2e;
         color: #cdd6f4;
@@ -307,7 +362,6 @@ class CodingAgentApp(App):
     def __init__(self, agent: Agent | None = None, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.textual_ui_adapter = TextualUIAdapter(self)
-
         if agent is not None:
             self.agent = agent
             self.agent.ui = self.textual_ui_adapter
@@ -318,7 +372,6 @@ class CodingAgentApp(App):
             self.agent.ui = self.textual_ui_adapter
             if hasattr(self.agent, "loop") and self.agent.loop is not None:
                 self.agent.loop.ui = self.textual_ui_adapter
-
         self.is_processing = False
         self.should_exit = False
         self._suggestions_active = False
@@ -326,6 +379,8 @@ class CodingAgentApp(App):
         self.SUGGESTION_COMMANDS = ["/exit", "/quit", "/q", "/clear", "/help"]
         self._activity_count = 0
         self._max_activities = 20
+
+    # ── Info row ──
 
     def _update_context_info(self) -> None:
         try:
@@ -341,6 +396,7 @@ class CodingAgentApp(App):
             return
         try:
             import ctypes
+
             kernel32 = ctypes.windll.kernel32
             imm32 = ctypes.windll.imm32
             col = self.input.region.x + 1
@@ -364,6 +420,8 @@ class CodingAgentApp(App):
     def on_key(self, event: Key) -> None:
         if self.should_exit:
             self.exit()
+
+    # ── Layout ──
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -394,15 +452,74 @@ class CodingAgentApp(App):
         except Exception:
             pass
         self._update_context_info()
-        self._add_message(
+        self._add_item("assistant",
             "👋 Hello! I'm your AI coding assistant."
-            "\nAsk me any programming question, and I'll do my best to help!",
-            is_user=False,
-        )
+            "\nAsk me any programming question, and I'll do my best to help!")
         self.thinking_label.update("Ready")
         self.info_status.update("Status: idle")
         self.input.focus()
         self._sync_ime_cursor()
+
+    # ── Multi-type list items ──
+
+    def _add_item(self, kind: str, text: str) -> None:
+        """Add an item of a given kind to the chat list.
+
+        kind ∈ {user, assistant, tool, tool-result, tool-error, error}
+        """
+        entry = ITEM_MAP.get(kind)
+        if entry is None:
+            bubble = Static(text, classes="assistant-bubble")
+            wrapper = Container(bubble, classes="message-wrapper message-assistant")
+        else:
+            bubble_cls, wrapper_cls = entry
+            bubble = Static(text, classes=bubble_cls)
+            wrapper = Container(bubble, classes=f"message-wrapper {wrapper_cls}")
+        self.chat_container.mount(wrapper)
+        try:
+            sv = self.query_one("#chat-area", ScrollableContainer)
+            sv.scroll_end(animate=False)
+        except Exception:
+            pass
+
+    # ── Activity panel ──
+
+    @staticmethod
+    def _activity_icon(status: str) -> str:
+        icons = {"running": "⏳", "completed": "✅", "failed": "❌", "cancelled": "🚫"}
+        return icons.get(status, "🔧")
+
+    def _add_activity(self, name: str, summary: str, status: str) -> None:
+        icon = self._activity_icon(status)
+        self._activity_count += 1
+        label = Label(f" {icon} {name}  {summary}", classes=f"activity-entry {status}")
+        self.activity_container.mount(label)
+        if self._activity_count > self._max_activities:
+            first = self.activity_container.children[0]
+            if first is not None:
+                first.remove()
+        try:
+            ap = self.query_one("#activity-panel", ScrollableContainer)
+            ap.scroll_end(animate=False)
+        except Exception:
+            pass
+
+    def _update_activity(self, name: str, status: str) -> None:
+        icon = self._activity_icon(status)
+        for child in reversed(list(self.activity_container.children)):
+            if isinstance(child, Label) and name in child.classes:
+                child.classes = f"activity-entry {status}"
+                text = child.renderable or ""
+                prefix = text[:2]
+                if prefix in (" ⏳", " ✅", " ❌", " 🚫"):
+                    text = f" {icon}" + text[2:]
+                    child.update(text)
+                break
+
+    def _clear_activities(self) -> None:
+        self.activity_container.remove_children()
+
+    # ── Input events ──
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         if self._suggestions_active:
@@ -425,67 +542,6 @@ class CodingAgentApp(App):
                 self._handle_slash_command(text)
             else:
                 self.send_message()
-
-    # === Activity panel ===
-
-    def _add_activity(self, name: str, summary: str, status: str) -> None:
-        """Add a tool activity entry to the activity panel."""
-        icon = {
-            "running": "⏳",
-            "completed": "✅",
-            "failed": "❌",
-            "cancelled": "🚫",
-        }.get(status, "🔧")
-        self._activity_count += 1
-        label = Label(f" {icon} {name}  {summary}", classes=f"activity-entry {status}")
-        self.activity_container.mount(label)
-        if self._activity_count > self._max_activities:
-            first = self.activity_container.children[0]
-            if first is not None:
-                first.remove()
-        try:
-            ap = self.query_one("#activity-panel", ScrollableContainer)
-            ap.scroll_end(animate=False)
-        except Exception:
-            pass
-
-    def _update_activity(self, name: str, status: str) -> None:
-        """Update the most recent activity entry matching name."""
-        icon = {
-            "running": "⏳",
-            "completed": "✅",
-            "failed": "❌",
-            "cancelled": "🚫",
-        }.get(status, "🔧")
-        for child in reversed(list(self.activity_container.children)):
-            if isinstance(child, Label):
-                classes = child.classes
-                if name in classes:
-                    child.classes = f"activity-entry {status}"
-                    text = child.renderable or ""
-                    prefix = text[:2]
-                    if prefix in (" ⏳", " ✅", " ❌", " 🚫"):
-                        text = f" {icon}" + text[2:]
-                        child.update(text)
-                    break
-
-    def _clear_activities(self) -> None:
-        self.activity_container.remove_children()
-
-    # === Message handling ===
-
-    def _add_message(self, text: str, is_user: bool) -> None:
-        if "\t" in text:
-            text = text.expandtabs()
-        if is_user:
-            bubble = Static(text, classes="user-bubble")
-            msg_wrapper = Container(bubble, classes="message-wrapper message-user")
-        else:
-            bubble = Static(text, classes="assistant-bubble")
-            msg_wrapper = Container(bubble, classes="message-wrapper message-assistant")
-        self.chat_container.mount(msg_wrapper)
-        scroll_view = self.query_one("#chat-area", ScrollableContainer)
-        scroll_view.scroll_end(animate=False)
 
     def action_quit(self) -> None:
         self.exit()
@@ -510,21 +566,19 @@ class CodingAgentApp(App):
             self.input.value = ""
             self.action_quit()
             return
-        elif cmd == "/clear":
-            self._add_message(command, is_user=True)
+        if cmd == "/clear":
+            self._add_item("user", command)
             self.chat_container.remove_children()
             self._clear_activities()
-            self._add_message(
+            self._add_item("assistant",
                 "👋 Chat history cleared."
-                " Ask me any programming question, and I'll do my best to help!",
-                is_user=False,
-            )
+                " Ask me any programming question, and I'll do my best to help!")
             self.thinking_label.update("Ready")
             self.info_status.update("Status: idle")
             self._update_context_info()
             return
-        elif cmd == "/help":
-            self._add_message(command, is_user=True)
+        if cmd == "/help":
+            self._add_item("user", command)
             help_text = (
                 "Available commands:\n"
                 "  /exit   - Exit the application\n"
@@ -533,15 +587,10 @@ class CodingAgentApp(App):
                 "  /clear  - Clear chat history\n"
                 "  /help   - Show this help message"
             )
-            self._add_message(help_text, is_user=False)
+            self._add_item("assistant", help_text)
             return
-        else:
-            self._add_message(command, is_user=True)
-            self._add_message(
-                f"Unknown command: '{command}'. Type /help for available commands.",
-                is_user=False,
-            )
-            return
+        self._add_item("user", command)
+        self._add_item("error", f"Unknown command: '{command}'. Type /help for available commands.")
 
     def on_input_changed(self, event: Input.Changed) -> None:
         value = event.value
@@ -581,7 +630,7 @@ class CodingAgentApp(App):
         if sv.index is None or sv.index <= 0:
             sv.index = len(sv.children) - 1
         else:
-            sv.index = sv.index - 1
+            sv.index -= 1
 
     def _suggestion_next(self) -> None:
         sv = self.query_one("#suggestion-list", ListView)
@@ -600,12 +649,14 @@ class CodingAgentApp(App):
             self.input.cursor_position = len(cmd)
         self._hide_suggestions()
 
+    # ── Message send / process ──
+
     def send_message(self) -> None:
         text = self.input.value.strip()
         if not text or self.is_processing:
             return
         self.input.value = ""
-        self._add_message(text, is_user=True)
+        self._add_item("user", text)
         self.thinking_label.update("🤔 Thinking...")
         self.info_status.update("Status: streaming")
         self.is_processing = True
@@ -617,11 +668,24 @@ class CodingAgentApp(App):
             self.thinking_label.update("Ready")
             self.info_status.update("Status: idle")
         except Exception as e:
-            self._add_message(f"Error: {str(e)}", is_user=False)
+            self._add_item("error", str(e))
             self.thinking_label.update("❌ Error occurred")
             self.info_status.update("Status: error")
         finally:
             self.is_processing = False
             self._update_context_info()
-            scroll_view = self.query_one("#chat-area", ScrollableContainer)
-            scroll_view.scroll_end(animate=True)
+            try:
+                sv = self.query_one("#chat-area", ScrollableContainer)
+                sv.scroll_end(animate=True)
+            except Exception:
+                pass
+
+
+ITEM_MAP: dict[str, tuple[str, str]] = {
+    "user":        ("user-bubble",        "message-user"),
+    "assistant":   ("assistant-bubble",   "message-assistant"),
+    "tool":        ("tool-bubble",        "message-tool"),
+    "tool-result": ("tool-result-bubble", "message-tool-result"),
+    "tool-error":  ("tool-error-bubble",  "message-tool-error"),
+    "error":       ("error-bubble",       "message-error"),
+}
