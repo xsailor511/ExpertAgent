@@ -39,7 +39,7 @@ class PermissionPolicy:
         if self.mode == PermissionMode.READONLY:
             if tool_name in self.DANGEROUS_TOOLS:
                 self.ui.print_warning(
-                    f"Readonly mode: blocked {tool_name}"
+                    f"只读模式：已阻止 {tool_name}"
                 )
                 return False
             return True
@@ -64,19 +64,19 @@ class PermissionPolicy:
         # 构造提示
         args_str = json.dumps(arguments, ensure_ascii=False, indent=2)
         prompt = (
-            f"\n[bold yellow]⚠ {tool_name}[/] wants to run:\n"
+            f"\n[bold yellow]⚠ {tool_name}[/] 想要运行:\n"
             f"[dim]{args_str}[/]\n"
-            f"Allow?"
+            f"是否允许？"
         )
         self.ui.console.print(prompt)
         # 同步确认 (在交互场景下可接受)
         import anyio
 
         approved = await anyio.to_thread.run_sync(
-            lambda: self.ui.confirm("Execute?", default=False)
+            lambda: self.ui.confirm("执行?", default=False)
         )
         if approved:
-            log.info(f"User approved {tool_name}")
+            log.info(f"用户已批准 {tool_name}")
         else:
-            log.info(f"User rejected {tool_name}")
+            log.info(f"用户已拒绝 {tool_name}")
         return approved

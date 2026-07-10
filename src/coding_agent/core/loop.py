@@ -86,7 +86,7 @@ class AgentLoop:
 
         else:
             # 超过最大迭代
-            final_response = "Reached maximum tool iterations without final answer."
+            final_response = "达到最大工具调用次数，未找到最终答案。"
             self.ui.print_warning(final_response)
 
         return final_response
@@ -95,7 +95,7 @@ class AgentLoop:
         """执行单个工具调用。"""
         tool = self.tools.get(tc.name)
         if tool is None:
-            result_text = f"Error: unknown tool '{tc.name}'"
+            result_text = f"错误：未知工具 '{tc.name}'"
             self.ui.print_tool_error(tc.name, tc.arguments, result_text)
             self.memory.add_tool(tc.id, tc.name, result_text)
             return
@@ -110,7 +110,7 @@ class AgentLoop:
             )
 
         if not approved:
-            result_text = f"Tool call '{tc.name}' was rejected by user"
+            result_text = f"工具调用 '{tc.name}' 被用户拒绝"
             self.ui.print_tool_rejected(tc.name, tc.arguments)
             self.memory.add_tool(tc.id, tc.name, result_text)
             return

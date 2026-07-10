@@ -1,4 +1,4 @@
-"""CLI entry point using Typer."""
+"""使用 Typer 的 CLI 入口点。"""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from coding_agent.config import PermissionMode, SandboxType, get_settings
 
 app = typer.Typer(
     name="coding-agent",
-    help="A Python-based coding agent.",
+    help="一个基于 Python 的编码智能体。",
     no_args_is_help=False,
     add_completion=False,
 )
@@ -31,6 +31,7 @@ def chat(
     ),
     sandbox: Optional[SandboxType] = typer.Option(None, "--sandbox", help="沙箱类型"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="详细日志"),
+    textual: bool = typer.Option(False, "--textual", "-t", help="使用现代 Textual TUI 界面"),
 ) -> None:
     """启动 coding agent。"""
     settings = get_settings()
@@ -46,21 +47,28 @@ def chat(
         settings.sandbox = sandbox
 
     rprint(f"[bold cyan]coding-agent[/] v0.1.0")
-    rprint(f"  model:      [yellow]{settings.model}[/]")
-    rprint(f"  workdir:    [yellow]{settings.workdir}[/]")
-    rprint(f"  permission: [yellow]{settings.permission.value}[/]")
-    rprint(f"  sandbox:    [yellow]{settings.sandbox.value}[/]")
+    rprint(f"  模型:      [yellow]{settings.model}[/]")
+    rprint(f"  工作目录:    [yellow]{settings.workdir}[/]")
+    rprint(f"  权限模式: [yellow]{settings.permission.value}[/]")
+    rprint(f"  沙箱类型:    [yellow]{settings.sandbox.value}[/]")
+    if textual:
+        rprint("  TUI界面:        [green]textual (现代)[/]")
+    else:
+        rprint("  TUI界面:        [dim]rich (传统)[/]")
     rprint()
 
     try:
         if message:
             # 单次模式
             asyncio.run(_run_once(message))
+        elif textual:
+            # Textual TUI 模式
+            _run_textual_tui(settings)
         else:
             # 交互模式
             asyncio.run(_run_interactive())
     except KeyboardInterrupt:
-        rprint("\n[dim]Bye 👋[/]")
+        rprint("\n[dim]再见 👋[/]")
 
 
 async def _run_once(message: str) -> None:
@@ -69,6 +77,24 @@ async def _run_once(message: str) -> None:
     agent = Agent.from_settings()
     await agent.run(message)
     await agent.close()
+
+
+def _run_textual_tui(settings) -> None:
+    """运行 Textual TUI 应用程序。"""
+    from coding_agent.core.agent import Agent
+    from coding_agent.ui.textual_app import CodingAgentApp
+
+    # 使用配置创建智能体
+    agent = Agent.from_settings(settings)
+
+    # 运行 Textual TUI 应用
+    app_instance = CodingAgentApp(agent=agent)
+    try:
+        app_instance.run()
+    except Exception as e:
+        rprint(f"[red]运行 TUI 时出错: {e}[/]")
+    finally:
+        asyncio.run(agent.close())
 
 
 async def _run_interactive() -> None:
@@ -102,14 +128,14 @@ async def _run_interactive() -> None:
             break
 
     await agent.close()
-    rprint("[dim]Bye 👋[/]")
+    rprint("[dim]再见 👋[/]")
 
 
 def _print_help() -> None:
     rprint("\n[bold]命令:[/]")
     rprint("  [cyan]/help[/]    显示帮助")
     rprint("  [cyan]/clear[/]  清空对话历史")
-    rprint("  [cyan]/exit[/]   退出")
+    rprint("  [cyan]/exit[/], /quit[/], /q   退出")
     rprint()
 
 

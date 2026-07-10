@@ -1,4 +1,4 @@
-"""Configuration management using pydantic-settings."""
+"""使用 pydantic-settings 的配置管理。"""
 
 from __future__ import annotations
 

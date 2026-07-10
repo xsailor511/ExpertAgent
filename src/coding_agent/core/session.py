@@ -38,7 +38,7 @@ class Session:
             session_id=session_id or str(uuid.uuid4())[:8],
             workdir=Path(workdir),
         )
-        log.info(f"Session started: {self.state.session_id} (workdir={workdir})")
+        log.info(f"会话已启动: {self.state.session_id} (工作目录={workdir})")
 
     def record_turn(self, tokens: int = 0) -> None:
         """记录一轮对话。"""
@@ -54,12 +54,12 @@ class Session:
     def summary(self) -> str:
         """生成会话摘要。"""
         return (
-            f"Session {self.state.session_id}: "
-            f"{self.state.turn_count} turns, "
-            f"{self.state.tool_call_count} tool calls, "
+            f"会话 {self.state.session_id}: "
+            f"{self.state.turn_count} 轮对话, "
+            f"{self.state.tool_call_count} 次工具调用, "
             f"{self.state.total_tokens} tokens"
         )
 
     async def close(self) -> None:
         """关闭会话。"""
-        log.info(f"Session closed: {self.summary()}")
+        log.info(f"会话已关闭: {self.summary()}")

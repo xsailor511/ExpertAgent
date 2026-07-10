@@ -1,4 +1,4 @@
-# Expert Agent
+# Expert Agent (专家智能体)
 
 基于专家概念的Agent，支持coding和work，面向实际部署的agent，每次部署就定一个专家，一个专家负责一个工作岗位
 
@@ -62,8 +62,11 @@ coding-agent/
 │   ├── ui/                 # 终端 UI
 │   ├── storage/            # 持久化
 │   ├── permissions/        # 权限控制
+│   ├── codebase/           # 代码库理解
 │   └── utils/              # 工具函数
-└── tests/
+├── tests/                  # 测试文件
+├── .env.example            # 环境变量模板
+└── pyproject.toml          # 项目依赖和配置
 ```
 
 ## License

@@ -72,7 +72,7 @@ class Memory:
             # 保留 system + 最近 max_messages 条
             keep = self.messages[:1] + self.messages[-self.max_messages:]
             dropped = len(self.messages) - len(keep)
-            log.debug(f"Compressing memory: dropped {dropped} old messages")
+            log.debug(f"压缩记忆：删除了 {dropped} 条旧消息")
             self.messages = keep
 
         # 2. token 限制
@@ -81,7 +81,7 @@ class Memory:
             keep_count = min(10, len(self.messages) - 1)
             keep = self.messages[:1] + self.messages[-keep_count:]
             log.warning(
-                f"Token limit exceeded, aggressively compressed to {len(keep)} messages"
+                f"超过 token 限制，已激进一步压缩至 {len(keep)} 条消息"
             )
             self.messages = keep
 

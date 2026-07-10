@@ -1,12 +1,12 @@
 [project]
 name = "coding-agent"
 version = "0.1.0"
-description = "A Python-based coding agent inspired by Claude Code"
+description = "一个受 Claude Code 启发的基于 Python 的编码智能体"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
-authors = [{ name = "Your Name", email = "you@example.com" }]
-keywords = ["agent", "llm", "coding", "ai", "cli"]
+authors = [{ name = "您的名字", email = "you@example.com" }]
+keywords = ["agent", "llm", "coding", "ai", "cli", "智能体", "编码"]
 
 dependencies = [
     # === LLM 调用层 ===

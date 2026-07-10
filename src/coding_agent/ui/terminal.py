@@ -32,7 +32,7 @@ class TerminalUI:
 
     def print_user(self, text: str) -> None:
         self.console.print(
-            Panel(Text(text, style="bold"), title="[bold blue]You[/]", border_style="blue")
+            Panel(Text(text, style="bold"), title="[bold blue]你[/]", border_style="blue")
         )
 
     # === LLM 流式输出 ===
@@ -40,7 +40,7 @@ class TerminalUI:
     def start_assistant_stream(self) -> None:
         self._buffer = ""
         self._live = Live(
-            Panel(Markdown(""), title="[bold green]Assistant[/]", border_style="green"),
+            Panel(Markdown(""), title="[bold green]智能体[/]", border_style="green"),
             console=self.console,
             refresh_per_second=15,
             transient=False,
@@ -54,7 +54,7 @@ class TerminalUI:
         self._live.update(
             Panel(
                 Markdown(self._buffer),
-                title="[bold green]Assistant[/]",
+                title="[bold green]智能体[/]",
                 border_style="green",
             )
         )
@@ -63,8 +63,8 @@ class TerminalUI:
         if self._live is not None:
             self._live.update(
                 Panel(
-                    Markdown(self._buffer) if self._buffer else Text("(no content)", style="dim"),
-                    title="[bold green]Assistant[/]",
+                    Markdown(self._buffer) if self._buffer else Text("(无内容)", style="dim"),
+                    title="[bold green]智能体[/]",
                     border_style="green",
                 )
             )
@@ -97,11 +97,11 @@ class TerminalUI:
         # 截断过长结果
         display = result
         if len(display) > 2000:
-            display = display[:2000] + f"\n... ({len(result)} chars total, truncated)"
+            display = display[:2000] + f"\n... (共 {len(result)} 字符，已截断)"
         self.console.print(
             Panel(
                 Text(display, style=style),
-                title=f"[{style}]{icon} {name} result[/]",
+                title=f"[{style}]{icon} {name} 结果[/]",
                 border_style=style,
                 padding=(0, 1),
             )
@@ -113,7 +113,7 @@ class TerminalUI:
         self.console.print(
             Panel(
                 Text(error, style="bold red"),
-                title=f"[bold red]❌ {name} error[/]",
+                title=f"[bold red]❌ {name} 错误[/]",
                 border_style="red",
             )
         )
@@ -121,8 +121,8 @@ class TerminalUI:
     def print_tool_rejected(self, name: str, arguments: dict[str, Any]) -> None:
         self.console.print(
             Panel(
-                Text("User rejected this tool call.", style="yellow"),
-                title=f"[yellow]🚫 {name} rejected[/]",
+                Text("用户拒绝了此工具调用。", style="yellow"),
+                title=f"[yellow]🚫 {name} 被拒绝[/]",
                 border_style="yellow",
             )
         )
