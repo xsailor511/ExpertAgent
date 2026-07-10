@@ -76,11 +76,25 @@ class ToolRegistry:
 
 def create_default_registry(workdir: Any) -> ToolRegistry:
     """创建默认工具集。"""
+    from coding_agent.skills.registry import SkillRegistry
+    from coding_agent.skills.tool import LoadSkillTool
+    from coding_agent.tasks.graph import TaskGraph
+    from coding_agent.tasks.store import TaskStore
+    from coding_agent.tasks.tools import (
+        ClaimTaskTool,
+        CompleteTaskTool,
+        CreateTaskTool,
+        GetTaskTool,
+        ListTasksTool,
+    )
     from coding_agent.tools.bash import BashTool
     from coding_agent.tools.file_edit import FileEditTool
     from coding_agent.tools.file_read import FileReadTool
     from coding_agent.tools.file_write import FileWriteTool
     from coding_agent.tools.search import SearchTool
+
+    store = TaskStore()
+    graph = TaskGraph(store)
 
     registry = ToolRegistry()
     registry.register(FileReadTool(workdir=workdir))
@@ -88,4 +102,12 @@ def create_default_registry(workdir: Any) -> ToolRegistry:
     registry.register(FileEditTool(workdir=workdir))
     registry.register(BashTool(workdir=workdir))
     registry.register(SearchTool(workdir=workdir))
+    skill_registry = SkillRegistry()
+    skill_registry.scan()
+    registry.register(LoadSkillTool(registry=skill_registry))
+    registry.register(CreateTaskTool(store=store, graph=graph))
+    registry.register(ListTasksTool(store=store))
+    registry.register(GetTaskTool(store=store))
+    registry.register(ClaimTaskTool(store=store, graph=graph))
+    registry.register(CompleteTaskTool(store=store, graph=graph))
     return registry

@@ -18,6 +18,7 @@ from coding_agent.core.session import Session
 from coding_agent.llm.base import LLMProvider
 from coding_agent.llm.router import create_llm
 from coding_agent.permissions.policy import PermissionPolicy
+from coding_agent.skills.registry import SkillRegistry
 from coding_agent.tools.registry import ToolRegistry, create_default_registry
 from coding_agent.ui.terminal import TerminalUI
 from coding_agent.utils.logging import get_logger, setup_logging
@@ -82,10 +83,13 @@ class Agent:
 
         llm = create_llm(settings=settings)
         tools = create_default_registry(workdir=settings.workdir)
+        skill_registry = SkillRegistry()
+        skill_registry.scan()
         memory = Memory(
             system_prompt=SYSTEM_PROMPT.format(workdir=settings.workdir),
             max_tokens=settings.max_tokens,
             max_messages=settings.max_history,
+            skill_registry=skill_registry,
         )
         session = Session(workdir=settings.workdir)
         ui = TerminalUI()

@@ -6,6 +6,7 @@ import json
 from typing import Any, Optional
 
 from coding_agent.llm.base import Message
+from coding_agent.skills.registry import SkillRegistry
 from coding_agent.utils.logging import get_logger
 from coding_agent.utils.tokens import count_tokens, estimate_messages_tokens
 
@@ -26,7 +27,10 @@ class Memory:
         system_prompt: str,
         max_tokens: int = 200_000,
         max_messages: int = 50,
+        skill_registry: SkillRegistry | None = None,
     ) -> None:
+        if skill_registry:
+            system_prompt = skill_registry.inject_catalog(system_prompt)
         self.system_prompt = system_prompt
         self.max_tokens = max_tokens
         self.max_messages = max_messages

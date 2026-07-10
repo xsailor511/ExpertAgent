@@ -20,10 +20,16 @@ async def test_default_registry(tmp_path: Path) -> None:
     assert "edit_file" in names
     assert "bash" in names
     assert "search" in names
+    assert "create_task" in names
+    assert "list_tasks" in names
+    assert "get_task" in names
+    assert "claim_task" in names
+    assert "complete_task" in names
+    assert "load_skill" in names
 
     # 测试 schema 生成
     schemas = registry.schemas()
-    assert len(schemas) == 5
+    assert len(schemas) == 11
     for schema in schemas:
         assert schema["type"] == "function"
         assert "name" in schema["function"]
