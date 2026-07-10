@@ -13,6 +13,7 @@ from coding_agent.core.hooks import (
 )
 from coding_agent.core.loop import AgentLoop
 from coding_agent.core.memory import Memory
+from coding_agent.core.recovery import RecoveryState
 from coding_agent.core.session import Session
 from coding_agent.llm.base import LLMProvider
 from coding_agent.llm.router import create_llm
@@ -62,6 +63,7 @@ class Agent:
         self.permissions = permissions
         self.hooks = HookRegistry()
         self.hooks.register(HookEvent.PRE_TOOL_USE, build_log_hook(log))
+        self.recovery_state = RecoveryState(primary=settings.model)
         self.loop = AgentLoop(
             llm=llm,
             tools=tools,
@@ -69,6 +71,7 @@ class Agent:
             ui=ui,
             permissions=permissions,
             hooks=self.hooks,
+            recovery_state=self.recovery_state,
         )
 
     @classmethod
