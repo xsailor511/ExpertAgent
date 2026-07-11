@@ -24,6 +24,7 @@ from coding_agent.skills.registry import SkillRegistry
 from coding_agent.teams.bus import MessageBus
 from coding_agent.teams.coordinator import TeamCoordinator
 from coding_agent.teams.worktree import GitWorktree
+from coding_agent.tools.mcp.config import find_mcp_config, load_mcp_config
 from coding_agent.tools.mcp.pool import ToolPool
 from coding_agent.tools.registry import ToolRegistry, create_default_registry
 from coding_agent.ui.terminal import TerminalUI
@@ -113,6 +114,13 @@ class Agent:
             skill_registry=skill_registry,
             workdir=settings.workdir,
         )
+
+        # Auto-connect MCP servers from mcp.json config (failures are dropped)
+        mcp_config_path = find_mcp_config(Path(settings.workdir))
+        if mcp_config_path:
+            mcp_config = load_mcp_config(mcp_config_path)
+            tool_pool.connect_from_config(mcp_config)
+            memory.context["mcp_servers"] = list(tool_pool._mcp_clients.keys())
 
         agent = cls(
             settings=settings,

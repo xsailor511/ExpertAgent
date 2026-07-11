@@ -60,3 +60,16 @@ def load_mcp_config(path: Path) -> MCPConfig:
             log.warning("Skipping MCP server '%s': invalid config: %s", name, e)
 
     return MCPConfig(servers=servers)
+
+
+def find_mcp_config(workdir: Path) -> Path | None:
+    """Search for mcp.json in the workdir using the candidate relative paths.
+
+    Returns the first that exists, or None.
+    """
+    for candidate in MCP_CONFIG_CANDIDATES:
+        resolved = workdir / candidate
+        if resolved.exists():
+            log.info("Found MCP config at %s", resolved)
+            return resolved
+    return None
