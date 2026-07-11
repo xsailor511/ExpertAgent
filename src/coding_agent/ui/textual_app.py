@@ -12,6 +12,7 @@ from textual.app import App, ComposeResult
 from textual.containers import Container, Horizontal, ScrollableContainer, Vertical
 from textual.events import Key
 from textual.widgets import Button, Header, Input, Label, ListItem, ListView, Static
+from textual.worker import Worker
 
 from coding_agent.core.agent import Agent
 from coding_agent.ui.terminal import TerminalUI
@@ -304,7 +305,6 @@ class CodingAgentApp(App):
     #suggestion-list {
         display: none;
         height: auto;
-        max-height: 12;
         margin: 0;
         background: #181825;
         border: tall #45475a;
@@ -386,10 +386,12 @@ class CodingAgentApp(App):
         self.is_processing = False
         self.should_exit = False
         self._suggestions_active = False
+        self._suggestions_readonly = False
         self._suggestion_commands: list[str] = []
-        self.SUGGESTION_COMMANDS = ["/exit", "/quit", "/q", "/clear", "/help", "/skills"]
+        self.SUGGESTION_COMMANDS = ["/exit", "/quit", "/q", "/clear", "/help", "/skills", "/mcp"]
         self._activity_count = 0
         self._max_activities = 20
+        self._agent_worker: Worker | None = None
 
     # ── Info row ──
 
@@ -510,6 +512,23 @@ class CodingAgentApp(App):
             pass
         return skills
 
+    def _get_mcp_status(self) -> list[str]:
+        items = []
+        try:
+            pool = self.agent.tools
+            configured = getattr(pool, "_mcp_config_servers", [])
+            if not configured:
+                return []
+            failures = getattr(pool, "_mcp_failures", {})
+            for name in configured:
+                if name in pool._mcp_clients:
+                    items.append(f"[bold][green]{name} (已连接)[/green][/bold]")
+                elif name in failures:
+                    items.append(f"[bold][red]{name} (连接失败)[/red][/bold]")
+        except Exception:
+            pass
+        return items
+
     @staticmethod
     def _truncate_lines(text: str, max_lines: int = 5) -> str:
         """Truncate text to max_lines of content, adding a hint for overflow."""
@@ -603,6 +622,13 @@ class CodingAgentApp(App):
                 self.send_message()
 
     def action_quit(self) -> None:
+        """Cancel running agent, close MCP subprocesses, then exit the app."""
+        # Cancel any in-flight agent worker first
+        if self._agent_worker and self._agent_worker.is_running:
+            self._agent_worker.cancel()
+        with suppress(Exception):
+            self.agent.tools.close()
+        self.should_exit = True
         self.exit()
 
     def action_send_message_action(self) -> None:
@@ -648,10 +674,20 @@ class CodingAgentApp(App):
                 self._add_item("assistant", msg)
             self.input.focus()
             return
+        if cmd == "/mcp":
+            self._add_item("user", command)
+            items = self._get_mcp_status()
+            if items:
+                self._show_suggestions(items, readonly=True)
+            else:
+                self._add_item("assistant", "No MCP servers configured.")
+            self.input.focus()
+            return
         if cmd == "/help":
             self._add_item("user", command)
             help_text = (
                 "Available commands:\n"
+                "  /mcp    - List MCP server connection status\n"
                 "  /skills - List available skills\n"
                 "  /exit   - Exit the application\n"
                 "  /quit   - Exit the application\n"
@@ -678,13 +714,15 @@ class CodingAgentApp(App):
         else:
             self._hide_suggestions()
 
-    def _show_suggestions(self, commands: list[str]) -> None:
+    def _show_suggestions(self, commands: list[str], readonly: bool = False) -> None:
         self._suggestion_commands = commands
+        self._suggestions_readonly = readonly
         sv = self.query_one("#suggestion-list", ListView)
         sv.clear()
+        max_visible = 6 if readonly else 12
+        sv.styles.max_height = min(len(commands), max_visible) + 2
         for cmd in commands:
             label = Label(cmd)
-            label.styles.color = "#cdd6f4"
             label.styles.padding = 0
             sv.append(ListItem(label))
         if sv.children:
@@ -717,11 +755,14 @@ class CodingAgentApp(App):
             sv.index = (sv.index + 1) % len(sv.children)
 
     def _suggestion_select(self) -> None:
+        if self._suggestions_readonly:
+            self._hide_suggestions()
+            return
         sv = self.query_one("#suggestion-list", ListView)
         if sv.index is not None and sv.index < len(self._suggestion_commands):
             cmd = self._suggestion_commands[sv.index]
             if not cmd.startswith("/"):
-                m = re.search(r'\[#89b4fa\]([\w-]+)\[/#89b4fa\]', cmd)
+                m = re.search(r"\[#89b4fa\]([\w-]+)\[/#89b4fa\]", cmd)
                 if m:
                     self.input.value = m.group(1) + " "
                     self.input.cursor_position = len(m.group(1)) + 1
@@ -762,7 +803,7 @@ class CodingAgentApp(App):
         self.thinking_label.update("🤔 Thinking...")
         self.info_status.update("Status: streaming")
         self.is_processing = True
-        self.run_worker(self.process_agent_response(final_text))
+        self._agent_worker = self.run_worker(self.process_agent_response(final_text))
 
     async def process_agent_response(self, user_text: str) -> None:
         try:

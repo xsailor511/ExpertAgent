@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 from typing import Any
 
 from coding_agent.tools.base import ToolResult
@@ -20,36 +21,58 @@ class ToolPool:
     def __init__(self, registry: ToolRegistry) -> None:
         self.registry = registry
         self._mcp_clients: dict[str, MCPClient] = {}
-        self._mcp_tools: dict[str, dict[str, Any]] = {}  # prefixed_name -> meta
+        self._mcp_tools: dict[str, dict[str, Any]] = {}
+        self._mcp_failures: dict[str, str] = {}
+        self._mcp_config_servers: list[str] = []
+        self._mcp_lock = threading.Lock()
 
     def register_mcp(self, server_name: str, client: MCPClient) -> None:
         """Register an MCP client and discover its tools."""
-        self._mcp_clients[server_name] = client
+        with self._mcp_lock:
+            self._mcp_clients[server_name] = client
         tools = client.discover_tools()
-        for t in tools:
-            self._mcp_tools[t["name"]] = t
+        with self._mcp_lock:
+            for t in tools:
+                self._mcp_tools[t["name"]] = t
 
     def connect_from_config(self, config: MCPConfig) -> None:
-        """Connect to all MCP servers defined in config.
+        """Connect to MCP servers in background daemon threads.
 
-        Failed connections are silently dropped (logged as warnings).
+        Returns immediately — the app starts without waiting for MCP.
+        Connections happen in parallel; results populate ``_mcp_clients``,
+        ``_mcp_tools`` and ``_mcp_failures`` as they complete.
         """
         log = logging.getLogger(__name__)
+        self._mcp_config_servers = list(config.servers.keys())
+        self._mcp_failures.clear()
+
         for name, server_cfg in config.servers.items():
-            if name in self._mcp_clients:
-                log.warning("MCP server '%s' already connected, skipping", name)
-                continue
-            try:
-                client = MCPClient(
-                    server_name=name,
-                    command=[server_cfg.command] + server_cfg.args,
-                    env=server_cfg.env,
-                )
-                client.connect()
-                self.register_mcp(name, client)
-                log.info("Connected to MCP server '%s'", name)
-            except Exception as e:
-                log.warning("Failed to connect MCP server '%s': %s", name, e)
+            with self._mcp_lock:
+                if name in self._mcp_clients:
+                    log.warning("MCP server '%s' already connected, skipping", name)
+                    continue
+            cmd_list = [server_cfg.command] + server_cfg.args
+            t = threading.Thread(
+                target=self._connect_and_register_one,
+                args=(name, cmd_list, server_cfg.env),
+                daemon=True,
+            )
+            t.start()
+
+    def _connect_and_register_one(
+        self, name: str, command: list[str], env: dict[str, str] | None
+    ) -> None:
+        """Connect a single MCP server and register its tools (runs in daemon thread)."""
+        log = logging.getLogger(__name__)
+        try:
+            client = MCPClient(server_name=name, command=command, env=env)
+            client.connect()
+            self.register_mcp(name, client)
+            log.info("Connected to MCP server '%s'", name)
+        except Exception as e:
+            log.warning("Failed to connect MCP server '%s': %s", name, e)
+            with self._mcp_lock:
+                self._mcp_failures[name] = str(e)
 
     def get(self, name: str) -> Any | None:
         """Look up a tool by name (builtin or MCP)."""
@@ -60,8 +83,10 @@ class ToolPool:
     def schemas(self) -> list[dict[str, Any]]:
         """Generate combined tool schemas (builtin + MCP)."""
         builtin_schemas = self.registry.schemas()
+        with self._mcp_lock:
+            mcp_tools_copy = dict(self._mcp_tools)
         mcp_schemas = []
-        for prefixed_name, meta in self._mcp_tools.items():
+        for prefixed_name, meta in mcp_tools_copy.items():
             mcp_schemas.append({
                 "type": "function",
                 "function": {
@@ -88,13 +113,23 @@ class ToolPool:
                 )
             server_name = parts[1]
             original_name = parts[2]
-            client = self._mcp_clients.get(server_name)
+            with self._mcp_lock:
+                client = self._mcp_clients.get(server_name)
             if not client:
+                err = self._mcp_failures.get(server_name)
+                if err:
+                    return ToolResult(
+                        content=f"MCP server '{server_name}' connection failed: {err}",
+                        is_error=True,
+                    )
                 return ToolResult(
-                    content=f"No MCP client for server: {server_name}",
+                    content=(
+                        f"MCP server '{server_name}' not yet connected. "
+                        "Retry after a moment."
+                    ),
                     is_error=True,
                 )
-            result = client.call_tool(original_name, arguments)
+            result = await client.call_tool(original_name, arguments)
             content = result.get("content", "")
             if isinstance(content, list):
                 text_parts = []
@@ -112,5 +147,7 @@ class ToolPool:
 
     def close(self) -> None:
         """Close all MCP clients."""
-        for client in self._mcp_clients.values():
+        with self._mcp_lock:
+            clients = list(self._mcp_clients.values())
+        for client in clients:
             client.close()

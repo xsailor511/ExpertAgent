@@ -149,8 +149,9 @@ class Agent:
         self.ui.print_info("历史记录已清空")
 
     async def close(self) -> None:
-        """释放资源。"""
+        """释放资源（含 MCP 子进程等）。"""
         if self.cron:
             self.cron.stop()
+        self.tools.close()
         await self.llm.close()
         await self.session.close()

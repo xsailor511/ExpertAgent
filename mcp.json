@@ -1,3 +1,14 @@
 {
-  "mcpServers": {}
+  "mcpServers": {
+    "bing-cn-mcp": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@iflow-mcp/bing-cn-mcp"
+      ],
+      "env": {
+        "USER_AGENT": "Chrome/120.0.0.0"
+      }
+    }
+  }
 }

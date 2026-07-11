@@ -68,7 +68,7 @@ def test_mcp_prefix_routing_no_client(registry: ToolRegistry):
 
     result = asyncio.run(pool.execute("mcp__server__tool", {}))
     assert result.is_error
-    assert "No MCP client" in result.content
+    assert "not yet connected" in result.content
 
 
 def test_mcp_invalid_name_format(registry: ToolRegistry):
@@ -81,7 +81,7 @@ def test_mcp_invalid_name_format(registry: ToolRegistry):
 
 
 def test_connect_from_config_success(registry: ToolRegistry):
-    """connect_from_config silently drops servers that fail."""
+    """connect_from_config sets servers list immediately; background thread connects later."""
     from coding_agent.tools.mcp.config import MCPConfig, MCPServerConfig
 
     pool = ToolPool(registry)
@@ -91,7 +91,9 @@ def test_connect_from_config_success(registry: ToolRegistry):
         ),
     })
     pool.connect_from_config(config)
-    assert "filesystem" not in pool._mcp_clients
+    # Servers are recorded immediately, clients connect in background
+    assert "filesystem" in pool._mcp_config_servers
+    # Client may or may not be populated yet — not guaranteed synchronously
 
 
 def test_connect_from_config_empty(registry: ToolRegistry):
