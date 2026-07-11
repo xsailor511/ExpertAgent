@@ -112,5 +112,53 @@ def init() -> None:
     rprint("  3. 运行 [bold]coding-agent[/] 启动 TUI")
 
 
+mcp_app = typer.Typer(help="管理 MCP 服务器连接。")
+
+
+@mcp_app.command(name="list")
+def mcp_list() -> None:
+    """列出已连接的 MCP 服务器。"""
+    from coding_agent.core.agent import Agent
+
+    agent = Agent.from_settings()
+    servers = list(agent.tools._mcp_clients.keys()) if hasattr(agent.tools, "_mcp_clients") else []
+    if not servers:
+        rprint("[yellow]没有已连接的 MCP 服务器。[/]")
+        rprint("提示：在项目根目录创建 [bold].opencode/mcp.json[/] 来配置 MCP 服务器。")
+        return
+
+    rprint("[bold green]已连接的 MCP 服务器:[/]")
+    for name in servers:
+        tool_count = len([t for t in agent.tools._mcp_tools if t.startswith(f"mcp__{name}__")])
+        rprint(f"  [cyan]{name}[/] — {tool_count} 个工具")
+
+
+@mcp_app.command(name="config")
+def mcp_config() -> None:
+    """显示当前 MCP 配置文件路径与内容摘要。"""
+    from pathlib import Path
+
+    from coding_agent.tools.mcp.config import find_mcp_config, load_mcp_config
+
+    path = find_mcp_config(Path("."))
+    if not path:
+        rprint("[yellow]未找到 MCP 配置文件。[/]")
+        rprint("可创建 [bold].opencode/mcp.json[/] 并参考 .opencode/mcp.json.example")
+        return
+
+    config = load_mcp_config(path)
+    rprint(f"[bold green]配置文件:[/] {path}")
+    if not config.servers:
+        rprint("  (无服务器配置)")
+        return
+    rprint("[bold]已定义服务器:[/]")
+    for name, server in config.servers.items():
+        env_str = f" env={list(server.env.keys())}" if server.env else ""
+        rprint(f"  [cyan]{name}[/] — {server.command} {' '.join(server.args)}{env_str}")
+
+
+app.add_typer(mcp_app, name="mcp")
+
+
 if __name__ == "__main__":
     app()
