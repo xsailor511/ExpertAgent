@@ -6,7 +6,7 @@ import json
 import threading
 import time
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -39,8 +39,8 @@ def _parse_field(value: str, min_v: int, max_v: int) -> set[int]:
 
 
 def match_cron(expr: str, dt: datetime | None = None) -> bool:
-    """Check if a 5-field cron expression matches the given time (default: now UTC)."""
-    dt = dt or datetime.now(UTC)
+    """Check if a 5-field cron expression matches the given time (default: now local)."""
+    dt = dt or datetime.now()
     fields = expr.strip().split()
     if len(fields) != 5:
         raise ValueError(f"Expected 5 fields, got {len(fields)}: {expr}")
@@ -75,7 +75,7 @@ class CronJob:
     def should_fire(self, dt: datetime | None = None) -> bool:
         if not self.enabled:
             return False
-        dt = dt or datetime.now(UTC)
+        dt = dt or datetime.now()
         now_ts = dt.timestamp()
         if self.last_fired is not None and now_ts - self.last_fired < 30:
             return False
@@ -146,7 +146,7 @@ class CronScheduler:
 
     def _run_loop(self) -> None:
         while self._running:
-            now = datetime.now(UTC)
+            now = datetime.now()
             with self._lock:
                 for job in self._jobs.values():
                     if job.should_fire(now):

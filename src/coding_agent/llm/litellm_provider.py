@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any, AsyncIterator, Optional
+from collections.abc import AsyncIterator
+from typing import Any
 
 from coding_agent.llm.base import LLMProvider, LLMResponse, Message, StreamChunk, ToolCall
 from coding_agent.utils.logging import get_logger
@@ -16,7 +17,7 @@ class LiteLLMProvider(LLMProvider):
     def __init__(
         self,
         model: str,
-        api_key: Optional[str] = None,
+        api_key: str | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(model, api_key, **kwargs)
@@ -28,9 +29,9 @@ class LiteLLMProvider(LLMProvider):
     async def chat(
         self,
         messages: list[Message],
-        tools: Optional[list[dict[str, Any]]] = None,
+        tools: list[dict[str, Any]] | None = None,
         temperature: float = 0.0,
-        max_tokens: Optional[int] = None,
+        max_tokens: int | None = None,
     ) -> LLMResponse:
         kwargs = self._build_kwargs(messages, tools, temperature, max_tokens)
         response = await self._litellm.acompletion(**kwargs)
@@ -39,9 +40,9 @@ class LiteLLMProvider(LLMProvider):
     async def stream(
         self,
         messages: list[Message],
-        tools: Optional[list[dict[str, Any]]] = None,
+        tools: list[dict[str, Any]] | None = None,
         temperature: float = 0.0,
-        max_tokens: Optional[int] = None,
+        max_tokens: int | None = None,
     ) -> AsyncIterator[StreamChunk]:
         kwargs = self._build_kwargs(messages, tools, temperature, max_tokens)
         kwargs["stream"] = True
@@ -59,9 +60,9 @@ class LiteLLMProvider(LLMProvider):
     def _build_kwargs(
         self,
         messages: list[Message],
-        tools: Optional[list[dict[str, Any]]],
+        tools: list[dict[str, Any]] | None,
         temperature: float,
-        max_tokens: Optional[int],
+        max_tokens: int | None,
     ) -> dict[str, Any]:
         kwargs: dict[str, Any] = {
             "model": self.model,

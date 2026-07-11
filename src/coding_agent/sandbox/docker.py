@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional
 
 from coding_agent.sandbox.base import ExecutionResult, Sandbox
 from coding_agent.utils.logging import get_logger
@@ -32,7 +31,7 @@ class DockerSandbox(Sandbox):
         self,
         command: str,
         timeout: int = 30,
-        cwd: Optional[str] = None,
+        cwd: str | None = None,
     ) -> ExecutionResult:
         # Docker SDK 是同步的, 这里用 anyio 包装
         import anyio

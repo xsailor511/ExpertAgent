@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from coding_agent.config import Settings, get_settings
 from coding_agent.core.background import BackgroundTaskManager
 from coding_agent.core.cron import CronScheduler
@@ -19,27 +21,15 @@ from coding_agent.llm.base import LLMProvider
 from coding_agent.llm.router import create_llm
 from coding_agent.permissions.policy import PermissionPolicy
 from coding_agent.skills.registry import SkillRegistry
+from coding_agent.teams.bus import MessageBus
+from coding_agent.teams.coordinator import TeamCoordinator
+from coding_agent.teams.worktree import GitWorktree
+from coding_agent.tools.mcp.pool import ToolPool
 from coding_agent.tools.registry import ToolRegistry, create_default_registry
 from coding_agent.ui.terminal import TerminalUI
 from coding_agent.utils.logging import get_logger, setup_logging
 
 log = get_logger(__name__)
-
-SYSTEM_PROMPT = """\
-你是一个在用户代码库中工作的专家编码智能体。
-
-你可以使用工具来读取、编写和编辑文件，运行 shell 命令，以及搜索代码。使用这些工具来完成用户的任务。
-
-指导原则：
-1. 在做出更改之前，始终先探索代码库（read_file、search）。
-2. 使用 edit_file 进行最小化、有针对性的编辑，而不是重写整个文件。
-3. 做出更改后，验证它们（运行测试，重新读取文件）。
-4. 解释你在做什么以及为什么这样做，但要简洁。
-5. 如果任务有歧义，请要求澄清。
-6. 永远不要伪造文件路径或内容 — 始终先读取。
-
-当前工作目录：{workdir}
-"""
 
 
 class Agent:
@@ -49,7 +39,7 @@ class Agent:
         self,
         settings: Settings,
         llm: LLMProvider,
-        tools: ToolRegistry,
+        tools: ToolRegistry | ToolPool,
         memory: Memory,
         session: Session,
         ui: TerminalUI,
@@ -88,26 +78,45 @@ class Agent:
         setup_logging(settings.log_level)
 
         llm = create_llm(settings=settings)
-        tools = create_default_registry(workdir=settings.workdir)
         skill_registry = SkillRegistry()
         skill_registry.scan()
-        memory = Memory(
-            system_prompt=SYSTEM_PROMPT.format(workdir=settings.workdir),
-            max_tokens=settings.max_tokens,
-            max_messages=settings.max_history,
-            skill_registry=skill_registry,
-        )
+
+        # Infrastructure
         session = Session(workdir=settings.workdir)
         ui = TerminalUI()
         permissions = PermissionPolicy(mode=settings.permission, ui=ui)
         bg_manager = BackgroundTaskManager()
         cron_scheduler = CronScheduler()
         cron_scheduler.start()
+        bus = MessageBus()
+        coordinator = TeamCoordinator(bus=bus)
+        worktree_manager = GitWorktree(repo_path=Path(settings.workdir))
+
+        # Tool registry (builtin tools only)
+        tools = create_default_registry(
+            workdir=settings.workdir,
+            llm=llm,
+            cron_scheduler=cron_scheduler,
+            worktree_manager=worktree_manager,
+            team_coordinator=coordinator,
+        )
+        # ToolPool wraps ToolRegistry and adds MCP tool support
+        tool_pool = ToolPool(registry=tools)
+        # Re-register connect_mcp with the pool reference
+        from coding_agent.tools.mcp_connect_tool import ConnectMCPTool
+        tools.register(ConnectMCPTool(pool=tool_pool))
+
+        memory = Memory(
+            max_tokens=settings.max_tokens,
+            max_messages=settings.max_history,
+            skill_registry=skill_registry,
+            workdir=settings.workdir,
+        )
 
         agent = cls(
             settings=settings,
             llm=llm,
-            tools=tools,
+            tools=tool_pool,
             memory=memory,
             session=session,
             ui=ui,

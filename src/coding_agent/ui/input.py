@@ -2,16 +2,13 @@
 
 from __future__ import annotations
 
-import asyncio
-from typing import Optional
-
 from prompt_toolkit import PromptSession
 from prompt_toolkit.history import InMemoryHistory
 from rich.console import Console
 
 
 class InputHandler:
-    """多行输入处理器。
+    r"""多行输入处理器。
 
     支持:
         - 多行输入 (以 \ 结尾续行)
@@ -22,7 +19,7 @@ class InputHandler:
     def __init__(self) -> None:
         self.console = Console()
         self.history = InMemoryHistory()
-        self.session: Optional[PromptSession] = None
+        self.session: PromptSession | None = None
 
     async def read(self, prompt: str = "❯ ") -> str:
         """读取用户输入 (支持多行)。"""

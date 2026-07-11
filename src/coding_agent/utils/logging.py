@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import sys
-from typing import Optional
 
 from loguru import logger as loguru_logger
 
@@ -11,7 +10,7 @@ from loguru import logger as loguru_logger
 loguru_logger.remove()
 
 
-def setup_logging(level: str = "INFO", log_file: Optional[str] = None) -> None:
+def setup_logging(level: str = "INFO", log_file: str | None = None) -> None:
     """配置全局日志。
 
     Args:

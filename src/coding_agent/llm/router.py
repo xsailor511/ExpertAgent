@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Optional
-
 from coding_agent.config import Settings, get_settings
 from coding_agent.llm.base import LLMProvider
 from coding_agent.llm.openai_provider import OpenAIProvider
@@ -13,8 +11,8 @@ log = get_logger(__name__)
 
 
 def create_llm(
-    model: Optional[str] = None,
-    settings: Optional[Settings] = None,
+    model: str | None = None,
+    settings: Settings | None = None,
 ) -> LLMProvider:
     """根据 model 字符串创建 LLM Provider。
 

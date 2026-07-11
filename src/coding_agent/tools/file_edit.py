@@ -41,7 +41,7 @@ class FileEditTool(Tool):
         if not file_path.exists():
             raise ToolError(f"File not found: {path}")
 
-        async with aiofiles.open(file_path, mode="r", encoding="utf-8") as f:
+        async with aiofiles.open(file_path, encoding="utf-8") as f:
             content = await f.read()
 
         # 检查唯一性

@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from coding_agent.tools.base import ToolError
-
 
 def safe_resolve(workdir: Path, path: str) -> Path:
     """安全地解析路径，防止路径越界。

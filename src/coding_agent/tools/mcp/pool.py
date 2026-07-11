@@ -27,6 +27,12 @@ class ToolPool:
         for t in tools:
             self._mcp_tools[t["name"]] = t
 
+    def get(self, name: str) -> Any | None:
+        """Look up a tool by name (builtin or MCP)."""
+        if name.startswith("mcp__"):
+            return self._mcp_tools.get(name)
+        return self.registry.get(name)
+
     def schemas(self) -> list[dict[str, Any]]:
         """Generate combined tool schemas (builtin + MCP)."""
         builtin_schemas = self.registry.schemas()

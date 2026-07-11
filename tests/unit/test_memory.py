@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from coding_agent.core.memory import Memory
 
 

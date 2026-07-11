@@ -6,7 +6,7 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from coding_agent.utils.logging import get_logger
 
@@ -33,7 +33,7 @@ class Session:
     负责跟踪会话元数据、状态快照、(可选)持久化。
     """
 
-    def __init__(self, workdir: Path, session_id: Optional[str] = None) -> None:
+    def __init__(self, workdir: Path, session_id: str | None = None) -> None:
         self.state = SessionState(
             session_id=session_id or str(uuid.uuid4())[:8],
             workdir=Path(workdir),

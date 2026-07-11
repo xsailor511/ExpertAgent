@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-import pytest
 from pathlib import Path
 
+import pytest
+
+from coding_agent.tools.base import ToolError
+from coding_agent.tools.file_edit import FileEditTool
 from coding_agent.tools.file_read import FileReadTool
 from coding_agent.tools.file_write import FileWriteTool
-from coding_agent.tools.file_edit import FileEditTool
-from coding_agent.tools.base import ToolError
 
 
 @pytest.fixture

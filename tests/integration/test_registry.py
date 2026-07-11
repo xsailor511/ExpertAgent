@@ -15,21 +15,15 @@ async def test_default_registry(tmp_path: Path) -> None:
     registry = create_default_registry(workdir=tmp_path)
 
     names = registry.list_names()
-    assert "read_file" in names
-    assert "write_file" in names
-    assert "edit_file" in names
-    assert "bash" in names
-    assert "search" in names
-    assert "create_task" in names
-    assert "list_tasks" in names
-    assert "get_task" in names
-    assert "claim_task" in names
-    assert "complete_task" in names
-    assert "load_skill" in names
+    for name in ("read_file", "write_file", "edit_file", "bash", "search",
+                 "glob", "todo_write", "compact",
+                 "create_task", "list_tasks", "get_task",
+                 "claim_task", "complete_task", "load_skill"):
+        assert name in names, f"Missing tool: {name}"
 
     # 测试 schema 生成
     schemas = registry.schemas()
-    assert len(schemas) == 11
+    assert len(schemas) >= 14
     for schema in schemas:
         assert schema["type"] == "function"
         assert "name" in schema["function"]

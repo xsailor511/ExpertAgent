@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, ClassVar, Optional
+from typing import Any, ClassVar
 
 import aiofiles
 from pydantic import BaseModel, Field
@@ -24,8 +24,8 @@ class FileReadTool(Tool):
 
     class Params(BaseModel):
         path: str = Field(..., description="要读取的文件路径 (相对工作目录或绝对路径)")
-        start_line: Optional[int] = Field(None, ge=1, description="起始行号 (1-based)")
-        end_line: Optional[int] = Field(None, ge=1, description="结束行号 (含)")
+        start_line: int | None = Field(None, ge=1, description="起始行号 (1-based)")
+        end_line: int | None = Field(None, ge=1, description="结束行号 (含)")
 
     def __init__(self, workdir: Path) -> None:
         self.workdir = Path(workdir)
@@ -33,8 +33,8 @@ class FileReadTool(Tool):
     async def execute(
         self,
         path: str,
-        start_line: Optional[int] = None,
-        end_line: Optional[int] = None,
+        start_line: int | None = None,
+        end_line: int | None = None,
         **kwargs: Any,
     ) -> ToolResult:
         file_path = safe_resolve(self.workdir, path)
@@ -49,7 +49,7 @@ class FileReadTool(Tool):
         if size > 10 * 1024 * 1024:
             raise ToolError(f"File too large ({size} bytes), max 10MB")
 
-        async with aiofiles.open(file_path, mode="r", encoding="utf-8", errors="replace") as f:
+        async with aiofiles.open(file_path, encoding="utf-8", errors="replace") as f:
             content = await f.read()
 
         lines = content.splitlines(keepends=True)

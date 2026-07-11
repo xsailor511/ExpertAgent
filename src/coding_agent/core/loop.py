@@ -6,13 +6,14 @@ import json
 from typing import Any
 
 from coding_agent.core.background import BackgroundTaskManager, _exec_command, is_slow
-from coding_agent.core.compaction import estimate_size, micro_compact, snip_compact
+from coding_agent.core.compaction import estimate_size, micro_compact, snip_compact, summary_compact
 from coding_agent.core.cron import CronScheduler
 from coding_agent.core.hooks import HookEvent, HookRegistry
 from coding_agent.core.recovery import RecoveryState, with_retry
 from coding_agent.llm.base import LLMProvider, LLMResponse
 from coding_agent.llm.streaming import StreamAggregator
 from coding_agent.permissions.policy import PermissionPolicy
+from coding_agent.tools.mcp.pool import ToolPool
 from coding_agent.tools.registry import ToolRegistry
 from coding_agent.ui.terminal import TerminalUI
 from coding_agent.utils.logging import get_logger
@@ -21,15 +22,26 @@ log = get_logger(__name__)
 
 # 单轮对话内最大工具调用次数 (防止死循环)
 MAX_TOOL_ITERATIONS = 25
+TODO_REMINDER_INTERVAL = 3  # 每 N 轮提醒更新 todo
 
 
 class AgentLoop:
-    """ReAct 循环: 思考 → 行动 → 观察 → 再思考。"""
+    """ReAct 循环: 思考 → 行动 → 观察 → 再思考。
+
+    完整 harness，包含:
+        - cron / background 通知注入
+        - 每轮 context compact + system prompt 刷新
+        - todo_write 跟踪与提醒
+        - compact 工具拦截 (history summarization)
+        - 慢 bash 后台 dispatch
+        - hooks + permission 管线
+        - ToolPool (内置 + MCP 工具)
+    """
 
     def __init__(
         self,
         llm: LLMProvider,
-        tools: ToolRegistry,
+        tools: ToolRegistry | ToolPool,
         memory: Any,  # Memory 实例
         ui: TerminalUI,
         permissions: PermissionPolicy,
@@ -62,33 +74,58 @@ class AgentLoop:
         # 2. 加入用户消息
         self.memory.add_user(user_input)
 
-        # 2.5 收集后台任务结果 + cron 触发任务
-        if self.bg_manager:
-            for note in self.bg_manager.collect_results():
-                self.memory.add_user(note)
-        if self.cron:
-            for prompt in self.cron.pop_fired():
-                self.memory.add_user(f"[Scheduled] {prompt}")
-
-        tool_schemas = self.tools.schemas()
         max_tokens = self.default_max_tokens
         final_response = ""
+        rounds_since_todo = 0
 
         for _iteration in range(MAX_TOOL_ITERATIONS):
-            # 3. 压缩管道 (在 LLM 调用之前)
+            # === Pre-LLM: inject scheduled / background / reminders ===
+
+            # Cron queue injection
+            if self.cron:
+                for prompt in self.cron.pop_fired():
+                    msg = f"[Cron] {prompt}"
+                    self.memory.add_user(msg)
+                    self.ui.print_user(msg)
+                    log.info(f"[cron inject] {prompt[:60]}")
+
+            # Background notifications
+            if self.bg_manager:
+                for note in self.bg_manager.collect_results():
+                    self.memory.add_user(note)
+
+            # Todo reminder
+            if rounds_since_todo >= TODO_REMINDER_INTERVAL:
+                self.memory.add_user("<reminder>更新你的 todo list (使用 todo_write)。</reminder>")
+                rounds_since_todo = 0
+
+            # === Context preparation ===
+
+            # 3. 压缩管道
             self.memory.messages = snip_compact(self.memory.messages)
             self.memory.messages = micro_compact(self.memory.messages)
             if estimate_size(self.memory.messages) > self.memory.max_tokens:
-                pass  # summary_compact 需要 LLM provider, 暂为占位
+                pass  # summary_compact in compact tool only
 
-            # 4. 流式调用 LLM (带重试和 max_tokens 升级)
+            # 4. 刷新 system prompt (skills, MCP, time 等)
+            self.memory.refresh_system_prompt()
+
+            # 5. 获取最新 tool schemas (包括新连接的 MCP 工具)
+            tool_schemas = self.tools.schemas()
+
+            # === LLM call ===
+
+            # 6. 流式调用 LLM (带重试和 max_tokens 升级)
             self.ui.start_assistant_stream()
+            _schemas = tool_schemas
 
-            async def _stream(_max_tokens: int = max_tokens) -> LLMResponse:
+            async def _stream(
+                _max_tokens: int = max_tokens, _schemas_guard: Any = _schemas
+            ) -> LLMResponse:
                 agg = StreamAggregator()
                 async for chunk in self.llm.stream(
                     messages=self.memory.messages,
-                    tools=tool_schemas,
+                    tools=_schemas_guard,
                     max_tokens=_max_tokens,
                 ):
                     if chunk.content:
@@ -99,18 +136,23 @@ class AgentLoop:
             response = await with_retry(_stream, state=self.recovery_state)
             self.ui.end_assistant_stream()
 
-            # 5. max_tokens 截断处理
+            # 7. max_tokens 截断处理
             if response.finish_reason == "max_tokens" and not self.recovery_state.has_escalated:
                 max_tokens = self.escalated_max_tokens
                 self.recovery_state.has_escalated = True
                 self.memory.add_assistant(content=response.content, tool_calls=[])
                 continue
-                # 已经升级过, 接受已有结果
 
             max_tokens = self.default_max_tokens
             self.recovery_state.has_escalated = False
 
-            # 6. 记录 assistant 消息 (含 tool_calls)
+            # 8. 如果没有工具调用, 说明 LLM 给出了最终回答
+            if not response.tool_calls:
+                await self.hooks.trigger(HookEvent.STOP)
+                final_response = response.content
+                break
+
+            # 9. 记录 assistant 消息 (含 tool_calls)
             self.memory.add_assistant(
                 content=response.content,
                 tool_calls=[
@@ -126,15 +168,22 @@ class AgentLoop:
                 ],
             )
 
-            # 7. 如果没有工具调用, 说明 LLM 给出了最终回答
-            if not response.tool_calls:
-                await self.hooks.trigger(HookEvent.STOP)
-                final_response = response.content
-                break
-
-            # 8. 执行工具调用
+            # 10. 处理所有工具调用
+            #     拦截 compact → 走 summarization; 其余正常执行
+            compacted = False
             for tc in response.tool_calls:
+                if tc.name == "compact":
+                    await self._handle_compact()
+                    compacted = True
+                    break
                 await self._execute_tool_call(tc)
+
+            # todo tracking
+            if not compacted:
+                has_todo = any(tc.name == "todo_write" for tc in response.tool_calls)
+                rounds_since_todo = 0 if has_todo else (rounds_since_todo + 1)
+            else:
+                rounds_since_todo = 0
 
         else:
             # 超过最大迭代
@@ -143,14 +192,25 @@ class AgentLoop:
 
         return final_response
 
+    # ── Compact handler ──
+
+    async def _handle_compact(self) -> None:
+        """Summarize conversation history and replace with compacted version."""
+        try:
+            compacted = await summary_compact(self.memory.messages, self.llm)
+            self.memory.messages = compacted
+            msg = "[Compacted. 对话历史已总结，继续工作。]"
+            self.ui.print_info(msg)
+            self.memory.add_user(msg)
+        except Exception as e:
+            self.ui.print_warning(f"Compact failed: {e}")
+
+    # ── Tool execution ──
+
     async def _execute_tool_call(self, tc: Any) -> None:
         """执行单个工具调用。"""
-        tool = self.tools.get(tc.name)
-        if tool is None:
-            result_text = f"错误：未知工具 '{tc.name}'"
-            self.ui.print_tool_error(tc.name, tc.arguments, result_text)
-            self.memory.add_tool(tc.id, tc.name, result_text)
-            return
+        # Tool lookup via ToolPool or ToolRegistry
+        tool = self.tools.get(tc.name) if hasattr(self.tools, "get") else None
 
         # Hook: PRE_TOOL_USE (在权限检查之前)
         blocked = await self.hooks.trigger(
@@ -161,11 +221,15 @@ class AgentLoop:
         if blocked:
             result_text = str(blocked)
             if result_text == "DESTRUCTIVE_PROMPT":
-                # 交互式权限请求
+                description = (
+                    getattr(tool, "description", "")
+                    if tool
+                    else tc.name
+                )
                 approved = await self.permissions.check(
                     tool_name=tc.name,
                     arguments=tc.arguments,
-                    description=tool.description,
+                    description=description,
                 )
                 if not approved:
                     result_text = f"工具调用 '{tc.name}' 被用户拒绝"
@@ -187,11 +251,11 @@ class AgentLoop:
 
         # 权限检查
         approved = True
-        if tool.requires_confirmation:
+        if tool and getattr(tool, "requires_confirmation", False):
             approved = await self.permissions.check(
                 tool_name=tc.name,
                 arguments=tc.arguments,
-                description=tool.description,
+                description=getattr(tool, "description", tc.name),
             )
 
         if not approved:

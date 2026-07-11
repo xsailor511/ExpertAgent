@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
-from typing import Optional
 
 from coding_agent.sandbox.base import ExecutionResult, Sandbox
 from coding_agent.utils.logging import get_logger
@@ -22,7 +21,7 @@ class LocalSandbox(Sandbox):
         self,
         command: str,
         timeout: int = 30,
-        cwd: Optional[str] = None,
+        cwd: str | None = None,
     ) -> ExecutionResult:
         work_dir = Path(cwd) if cwd else self.workdir
         log.debug(f"LocalSandbox run: {command} (cwd={work_dir})")
@@ -44,7 +43,7 @@ class LocalSandbox(Sandbox):
                 stderr=stderr.decode("utf-8", errors="replace"),
                 exit_code=proc.returncode or 0,
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             proc.kill()
             await proc.wait()
             return ExecutionResult(

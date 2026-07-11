@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from coding_agent.utils.logging import get_logger
 
@@ -19,7 +19,7 @@ class ResponseCache:
     生产环境建议替换为 Redis。
     """
 
-    def __init__(self, base_dir: Optional[Path] = None) -> None:
+    def __init__(self, base_dir: Path | None = None) -> None:
         if base_dir is None:
             base_dir = Path.home() / ".coding_agent" / "cache"
         self.base_dir = Path(base_dir)
@@ -34,7 +34,7 @@ class ResponseCache:
         )
         return hashlib.sha256(payload.encode()).hexdigest()
 
-    def get(self, model: str, messages: list[dict[str, Any]], **kwargs: Any) -> Optional[Any]:
+    def get(self, model: str, messages: list[dict[str, Any]], **kwargs: Any) -> Any | None:
         """读取缓存。"""
         key = self._key(model, messages, **kwargs)
         path = self.base_dir / f"{key}.json"

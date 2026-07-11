@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 import difflib
-from typing import Optional
 
 
-def generate_diff(old_text: str, new_text: str, filename: Optional[str] = None) -> str:
+def generate_diff(old_text: str, new_text: str, filename: str | None = None) -> str:
     """生成 unified diff。"""
     old_lines = old_text.splitlines(keepends=True)
     new_lines = new_text.splitlines(keepends=True)

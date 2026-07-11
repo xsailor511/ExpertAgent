@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from coding_agent.utils.logging import get_logger
 
@@ -17,7 +17,7 @@ class HistoryStore:
     存储路径: ~/.coding_agent/history/{session_id}.json
     """
 
-    def __init__(self, base_dir: Optional[Path] = None) -> None:
+    def __init__(self, base_dir: Path | None = None) -> None:
         if base_dir is None:
             base_dir = Path.home() / ".coding_agent" / "history"
         self.base_dir = Path(base_dir)
@@ -35,7 +35,7 @@ class HistoryStore:
         except Exception as e:
             log.error(f"Failed to save history: {e}")
 
-    def load(self, session_id: str) -> Optional[list[dict[str, Any]]]:
+    def load(self, session_id: str) -> list[dict[str, Any]] | None:
         """加载对话历史。"""
         path = self.base_dir / f"{session_id}.json"
         if not path.exists():

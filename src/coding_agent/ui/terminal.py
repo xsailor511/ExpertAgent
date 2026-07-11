@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Optional
+from typing import Any
 
 from rich.console import Console
 from rich.live import Live
@@ -25,7 +25,7 @@ class TerminalUI:
 
     def __init__(self) -> None:
         self.console = Console()
-        self._live: Optional[Live] = None
+        self._live: Live | None = None
         self._buffer: str = ""
 
     # === 用户输入 ===

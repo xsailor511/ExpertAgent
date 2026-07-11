@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+from contextlib import suppress
 from typing import Any
 
 from textual.app import App, ComposeResult
@@ -77,7 +78,7 @@ class TextualUIAdapter(TerminalUI):
             pass
 
     def print_user(self, text: str) -> None:
-        """User message already added by send_message()."""
+        self.app._add_item("user", text)
 
     def start_assistant_stream(self) -> None:
         self._buffer = ""
@@ -92,11 +93,15 @@ class TextualUIAdapter(TerminalUI):
         if not self._is_streaming:
             return
         if not self._has_content:
+            if not chunk.strip():
+                return
             self._has_content = True
+            self._buffer = chunk
             self._create_bubble_sync()
+        else:
+            self._buffer = (self._buffer or "") + chunk
         if self.assistant_bubble is None:
             return
-        self._buffer = (self._buffer or "") + chunk
         self.assistant_bubble.update(self._buffer)
         self.assistant_bubble.refresh(layout=True)
         try:
@@ -110,9 +115,12 @@ class TextualUIAdapter(TerminalUI):
     def end_assistant_stream(self) -> None:
         self._is_streaming = False
         if self._has_content and self.assistant_bubble is not None:
-            display = self._buffer if self._buffer else "(no content)"
+            display = self._buffer.strip() if (self._buffer or "").strip() else "(no content)"
             self.assistant_bubble.update(display)
             self.assistant_bubble.refresh(layout=True)
+        elif self._buffer and not self._buffer.strip() and self.msg_wrapper is not None:
+            with suppress(Exception):
+                self.msg_wrapper.remove()
         self.assistant_bubble = None
         self.msg_wrapper = None
         self.app.thinking_label.update("Ready")
@@ -123,7 +131,6 @@ class TextualUIAdapter(TerminalUI):
     def print_tool_call(self, name: str, arguments: dict[str, Any]) -> None:
         summary = _summarize_args(name, arguments)
         self.app._add_item("tool", f"🔧 {name}  {summary}")
-        self.app._add_activity(name, summary, "running")
         self.app.info_status.update(f"Status: ⚡ {name}")
 
     def print_tool_result(self, name: str, result: str, *, is_error: bool = False) -> None:
@@ -131,18 +138,15 @@ class TextualUIAdapter(TerminalUI):
             display = _summarize_result(name, result)
             kind = "tool-error" if is_error else "tool-result"
             self.app._add_item(kind, display)
-        self.app._update_activity(name, "failed" if is_error else "completed")
         self.app.info_status.update(f"Status: {'❌' if is_error else '✅'} {name}")
 
     def print_tool_error(self, name: str, arguments: dict[str, Any], error: str) -> None:
         summary = _summarize_args(name, arguments)
         self.app._add_item("tool", f"🔧 {name}  {summary}  ❌ {error[:120]}")
-        self.app._add_activity(name, summary, "failed")
 
     def print_tool_rejected(self, name: str, arguments: dict[str, Any]) -> None:
         summary = _summarize_args(name, arguments)
         self.app._add_item("tool", f"🚫 {name}  {summary}  rejected")
-        self.app._add_activity(name, summary, "cancelled")
 
     def print_info(self, msg: str) -> None:
         self.app.thinking_label.update(msg)
@@ -459,6 +463,23 @@ class CodingAgentApp(App):
         self.info_status.update("Status: idle")
         self.input.focus()
         self._sync_ime_cursor()
+        self.set_interval(1, self._poll_cron)
+
+    async def _poll_cron(self) -> None:
+        """Periodic cron poll — process fired tasks when agent is idle."""
+        if self.is_processing:
+            return
+        cron = getattr(self.agent, "cron", None)
+        if not cron:
+            return
+        fired = cron.pop_fired()
+        if not fired:
+            return
+        self.thinking_label.update("🤔 Thinking...")
+        self.info_status.update("Status: streaming")
+        self.is_processing = True
+        prompts_text = " | ".join(f"[Cron] {p}" for p in fired)
+        await self.process_agent_response(prompts_text)
 
     # ── Multi-type list items ──
 
@@ -656,7 +677,6 @@ class CodingAgentApp(App):
         if not text or self.is_processing:
             return
         self.input.value = ""
-        self._add_item("user", text)
         self.thinking_label.update("🤔 Thinking...")
         self.info_status.update("Status: streaming")
         self.is_processing = True

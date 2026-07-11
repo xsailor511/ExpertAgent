@@ -8,7 +8,7 @@ from typing import Any, ClassVar
 import aiofiles
 from pydantic import BaseModel, Field
 
-from coding_agent.tools.base import Tool, ToolError, ToolResult
+from coding_agent.tools.base import Tool, ToolResult
 from coding_agent.utils.security import safe_resolve
 
 

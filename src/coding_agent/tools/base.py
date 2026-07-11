@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, ClassVar, Optional
+from typing import Any, ClassVar
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 
 class ToolError(Exception):
@@ -53,7 +53,7 @@ class Tool(ABC):
         """执行工具。"""
         ...
 
-    def validate(self, arguments: dict[str, Any]) -> "Tool.Params":
+    def validate(self, arguments: dict[str, Any]) -> Tool.Params:
         """校验参数。"""
         return self.Params.model_validate(arguments)
 

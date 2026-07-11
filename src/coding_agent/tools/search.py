@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import shutil
 from pathlib import Path
-from typing import Any, ClassVar, Optional
+from typing import Any, ClassVar
 
 from pydantic import BaseModel, Field
 
@@ -23,7 +23,7 @@ class SearchTool(Tool):
 
     class Params(BaseModel):
         pattern: str = Field(..., description="搜索模式 (支持正则)")
-        glob: Optional[str] = Field(None, description="文件名过滤, 如 '*.py'")
+        glob: str | None = Field(None, description="文件名过滤, 如 '*.py'")
         max_results: int = Field(50, ge=1, le=500)
 
     def __init__(self, workdir: Path) -> None:
@@ -32,7 +32,7 @@ class SearchTool(Tool):
     async def execute(
         self,
         pattern: str,
-        glob: Optional[str] = None,
+        glob: str | None = None,
         max_results: int = 50,
         **kwargs: Any,
     ) -> ToolResult:
@@ -62,7 +62,7 @@ class SearchTool(Tool):
                 stderr=asyncio.subprocess.PIPE,
             )
             stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=15)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             raise ToolError("Search timed out")
 
         output = stdout.decode("utf-8", errors="replace")
@@ -81,7 +81,7 @@ class SearchTool(Tool):
         )
 
     async def _fallback_search(
-        self, pattern: str, glob: Optional[str], max_results: int
+        self, pattern: str, glob: str | None, max_results: int
     ) -> ToolResult:
         """无 ripgrep 时的降级搜索。"""
         import fnmatch

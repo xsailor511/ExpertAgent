@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from enum import Enum
 from pathlib import Path
-from typing import Optional
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -38,13 +37,13 @@ class Settings(BaseSettings):
 
     # === LLM ===
     model: str = "openai:gpt-4o"
-    base_url: Optional[str] = None
-    api_key: Optional[str] = None
+    base_url: str | None = None
+    api_key: str | None = None
 
     # 兼容读取各厂商 key
-    openai_api_key: Optional[str] = Field(default=None, alias="OPENAI_API_KEY")
-    anthropic_api_key: Optional[str] = Field(default=None, alias="ANTHROPIC_API_KEY")
-    zhipuai_api_key: Optional[str] = Field(default=None, alias="ZHIPUAI_API_KEY")
+    openai_api_key: str | None = Field(default=None, alias="OPENAI_API_KEY")
+    anthropic_api_key: str | None = Field(default=None, alias="ANTHROPIC_API_KEY")
+    zhipuai_api_key: str | None = Field(default=None, alias="ZHIPUAI_API_KEY")
 
     # === 工作目录 ===
     workdir: Path = Field(default=Path("."))
@@ -62,7 +61,7 @@ class Settings(BaseSettings):
 
     # === 日志 ===
     log_level: str = "INFO"
-    log_file: Optional[Path] = None
+    log_file: Path | None = None
 
     @field_validator("workdir")
     @classmethod
@@ -71,7 +70,7 @@ class Settings(BaseSettings):
 
 
 # 全局单例
-_settings: Optional[Settings] = None
+_settings: Settings | None = None
 
 
 def get_settings() -> Settings:

@@ -4,11 +4,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
+from coding_agent.utils.diff import generate_diff, generate_inline_diff
 from coding_agent.utils.security import is_within, safe_resolve, sanitize_filename
 from coding_agent.utils.tokens import count_tokens, estimate_messages_tokens
-from coding_agent.utils.diff import generate_diff, generate_inline_diff
 
 
 def test_safe_resolve_relative(tmp_path: Path) -> None:

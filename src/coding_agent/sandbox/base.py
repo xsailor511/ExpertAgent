@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Optional
 
 
 @dataclass
@@ -25,7 +24,7 @@ class Sandbox(ABC):
         self,
         command: str,
         timeout: int = 30,
-        cwd: Optional[str] = None,
+        cwd: str | None = None,
     ) -> ExecutionResult:
         """在沙箱中执行命令。"""
         ...

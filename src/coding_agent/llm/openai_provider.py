@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import json
-from typing import Any, AsyncIterator, Optional
+from collections.abc import AsyncIterator
+from typing import Any
 
 from coding_agent.llm.base import (
     LLMProvider,
@@ -23,8 +24,8 @@ class OpenAIProvider(LLMProvider):
     def __init__(
         self,
         model: str,
-        api_key: Optional[str] = None,
-        base_url: Optional[str] = None,
+        api_key: str | None = None,
+        base_url: str | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(model, api_key, base_url, **kwargs)
@@ -42,9 +43,9 @@ class OpenAIProvider(LLMProvider):
     async def chat(
         self,
         messages: list[Message],
-        tools: Optional[list[dict[str, Any]]] = None,
+        tools: list[dict[str, Any]] | None = None,
         temperature: float = 0.0,
-        max_tokens: Optional[int] = None,
+        max_tokens: int | None = None,
     ) -> LLMResponse:
         kwargs = self._build_kwargs(messages, tools, temperature, max_tokens, stream=False)
         response = await self.client.chat.completions.create(**kwargs)
@@ -53,9 +54,9 @@ class OpenAIProvider(LLMProvider):
     async def stream(
         self,
         messages: list[Message],
-        tools: Optional[list[dict[str, Any]]] = None,
+        tools: list[dict[str, Any]] | None = None,
         temperature: float = 0.0,
-        max_tokens: Optional[int] = None,
+        max_tokens: int | None = None,
     ) -> AsyncIterator[StreamChunk]:
         kwargs = self._build_kwargs(messages, tools, temperature, max_tokens, stream=True)
         response = await self.client.chat.completions.create(**kwargs)
@@ -108,9 +109,9 @@ class OpenAIProvider(LLMProvider):
     def _build_kwargs(
         self,
         messages: list[Message],
-        tools: Optional[list[dict[str, Any]]],
+        tools: list[dict[str, Any]] | None,
         temperature: float,
-        max_tokens: Optional[int],
+        max_tokens: int | None,
         stream: bool,
     ) -> dict[str, Any]:
         kwargs: dict[str, Any] = {

@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
-from typing import Any, AsyncIterator, Literal, Optional
-
-from pydantic import BaseModel
+from typing import Any, Literal
 
 
 @dataclass
@@ -17,8 +16,8 @@ class Message:
     content: str = ""
     # 工具调用相关
     tool_calls: list[dict[str, Any]] = field(default_factory=list)
-    tool_call_id: Optional[str] = None  # role=tool 时使用
-    name: Optional[str] = None  # 工具名
+    tool_call_id: str | None = None  # role=tool 时使用
+    name: str | None = None  # 工具名
 
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {"role": self.role, "content": self.content}
@@ -55,8 +54,8 @@ class StreamChunk:
     """流式响应的一个 chunk。"""
 
     content: str = ""
-    tool_call: Optional[ToolCall] = None  # 工具调用（通常在流结束时给出）
-    finish_reason: Optional[str] = None
+    tool_call: ToolCall | None = None  # 工具调用（通常在流结束时给出）
+    finish_reason: str | None = None
 
 
 class LLMProvider(ABC):
@@ -65,8 +64,8 @@ class LLMProvider(ABC):
     def __init__(
         self,
         model: str,
-        api_key: Optional[str] = None,
-        base_url: Optional[str] = None,
+        api_key: str | None = None,
+        base_url: str | None = None,
         **kwargs: Any,
     ) -> None:
         self.model = model
@@ -78,9 +77,9 @@ class LLMProvider(ABC):
     async def chat(
         self,
         messages: list[Message],
-        tools: Optional[list[dict[str, Any]]] = None,
+        tools: list[dict[str, Any]] | None = None,
         temperature: float = 0.0,
-        max_tokens: Optional[int] = None,
+        max_tokens: int | None = None,
     ) -> LLMResponse:
         """同步对话。"""
         ...
@@ -89,9 +88,9 @@ class LLMProvider(ABC):
     async def stream(
         self,
         messages: list[Message],
-        tools: Optional[list[dict[str, Any]]] = None,
+        tools: list[dict[str, Any]] | None = None,
         temperature: float = 0.0,
-        max_tokens: Optional[int] = None,
+        max_tokens: int | None = None,
     ) -> AsyncIterator[StreamChunk]:
         """流式对话。"""
         ...

@@ -33,6 +33,10 @@ class SkillRegistry:
                 "content": raw,
             }
 
+    def list_skill_dicts(self) -> list[dict[str, Any]]:
+        """返回技能字典列表 (用于 prompt 汇编)。"""
+        return list(self._skills.values())
+
     def list_skills(self) -> str:
         if not self._skills:
             return "(no skills found)"

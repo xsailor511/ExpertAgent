@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
-from typing import Optional
 
 import typer
 from rich import print as rprint
@@ -21,15 +20,15 @@ app = typer.Typer(
 
 @app.command()
 def chat(
-    message: Optional[str] = typer.Option(
+    message: str | None = typer.Option(
         None, "-m", "--message", help="单次执行模式：直接传入消息，不进入交互"
     ),
-    model: Optional[str] = typer.Option(None, "--model", help="覆盖默认模型"),
-    workdir: Optional[Path] = typer.Option(None, "--workdir", "-C", help="工作目录"),
-    permission: Optional[PermissionMode] = typer.Option(
+    model: str | None = typer.Option(None, "--model", help="覆盖默认模型"),
+    workdir: Path | None = typer.Option(None, "--workdir", "-C", help="工作目录"),
+    permission: PermissionMode | None = typer.Option(
         None, "--permission", "-p", help="权限模式"
     ),
-    sandbox: Optional[SandboxType] = typer.Option(None, "--sandbox", help="沙箱类型"),
+    sandbox: SandboxType | None = typer.Option(None, "--sandbox", help="沙箱类型"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="详细日志"),
     textual: bool = typer.Option(False, "--textual", "-t", help="使用现代 Textual TUI 界面"),
 ) -> None:
@@ -46,7 +45,7 @@ def chat(
     if sandbox:
         settings.sandbox = sandbox
 
-    rprint(f"[bold cyan]coding-agent[/] v0.1.0")
+    rprint("[bold cyan]coding-agent[/] v0.1.0")
     rprint(f"  模型:      [yellow]{settings.model}[/]")
     rprint(f"  工作目录:    [yellow]{settings.workdir}[/]")
     rprint(f"  权限模式: [yellow]{settings.permission.value}[/]")
