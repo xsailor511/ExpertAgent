@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from contextlib import suppress
 from typing import Any
 
@@ -57,6 +58,7 @@ class TextualUIAdapter(TerminalUI):
     def __init__(self, app_instance: CodingAgentApp):
         super().__init__()
         self.app = app_instance
+        self._user_msg_shown = False
         self._is_streaming = False
         self._buffer = ""
         self._has_content = False
@@ -76,6 +78,9 @@ class TextualUIAdapter(TerminalUI):
             pass
 
     def print_user(self, text: str) -> None:
+        if self._user_msg_shown:
+            self._user_msg_shown = False
+            return
         self.app._add_item("user", text)
 
     def start_assistant_stream(self) -> None:
@@ -161,12 +166,12 @@ class TextualUIAdapter(TerminalUI):
 
 
 ITEMS = {
-    "user":        ("user-bubble",         "message-user"),
-    "assistant":   ("assistant-bubble",    "message-assistant"),
-    "tool":        ("tool-bubble",         "message-tool"),
-    "tool-result": ("tool-result-bubble",  "message-tool-result"),
-    "tool-error":  ("tool-error-bubble",   "message-tool-error"),
-    "error":       ("error-bubble",        "message-error"),
+    "user": ("user-bubble", "message-user"),
+    "assistant": ("assistant-bubble", "message-assistant"),
+    "tool": ("tool-bubble", "message-tool"),
+    "tool-result": ("tool-result-bubble", "message-tool-result"),
+    "tool-error": ("tool-error-bubble", "message-tool-error"),
+    "error": ("error-bubble", "message-error"),
 }
 
 
@@ -299,16 +304,20 @@ class CodingAgentApp(App):
     #suggestion-list {
         display: none;
         height: auto;
-        max-height: 6;
-        margin: 0 2;
+        max-height: 12;
+        margin: 0;
         background: #181825;
         border: tall #45475a;
         padding: 0;
     }
 
-    #suggestion-list > .list-view--highlighted {
-        background: #313244;
+    #suggestion-list ListItem {
+        height: 1;
+        min-height: 1;
+        padding: 0 1;
     }
+
+
 
     /* ── Input area ── */
     #input-area {
@@ -378,7 +387,7 @@ class CodingAgentApp(App):
         self.should_exit = False
         self._suggestions_active = False
         self._suggestion_commands: list[str] = []
-        self.SUGGESTION_COMMANDS = ["/exit", "/quit", "/q", "/clear", "/help"]
+        self.SUGGESTION_COMMANDS = ["/exit", "/quit", "/q", "/clear", "/help", "/skills"]
         self._activity_count = 0
         self._max_activities = 20
 
@@ -454,9 +463,11 @@ class CodingAgentApp(App):
         except Exception:
             pass
         self._update_context_info()
-        self._add_item("assistant",
+        self._add_item(
+            "assistant",
             "👋 Hello! I'm your AI coding assistant."
-            "\nAsk me any programming question, and I'll do my best to help!")
+            "\nAsk me any programming question, and I'll do my best to help!",
+        )
         self.thinking_label.update("Ready")
         self.info_status.update("Status: idle")
         self.input.focus()
@@ -473,13 +484,31 @@ class CodingAgentApp(App):
         fired = cron.pop_fired()
         if not fired:
             return
-        self.thinking_label.update("🤔 Thinking...")
-        self.info_status.update("Status: streaming")
         self.is_processing = True
         prompts_text = " | ".join(f"[Cron] {p}" for p in fired)
+        self.thinking_label.update("🤔 Thinking...")
+        self.info_status.update("Status: streaming")
         await self.process_agent_response(prompts_text)
 
     # ── Multi-type list items ──
+
+    def _get_skill_suggestions(self) -> list[str]:
+        skills = []
+        try:
+            reg = self.agent.memory.skill_registry
+            if reg:
+                for info in reg.list_skill_dicts():
+                    desc = info["description"].replace("\n", " ")
+                    if len(desc) > 50:
+                        desc = desc[:50] + "…"
+                    markup = (
+                        f"[bold][#89b4fa]{info['name']}[/#89b4fa][/bold] "
+                        f"[dim][#585b70]{desc}[/#585b70][/dim]"
+                    )
+                    skills.append(markup)
+        except Exception:
+            pass
+        return skills
 
     @staticmethod
     def _truncate_lines(text: str, max_lines: int = 5) -> str:
@@ -600,17 +629,30 @@ class CodingAgentApp(App):
             self._add_item("user", command)
             self.chat_container.remove_children()
             self._clear_activities()
-            self._add_item("assistant",
+            self._add_item(
+                "assistant",
                 "👋 Chat history cleared."
-                " Ask me any programming question, and I'll do my best to help!")
+                " Ask me any programming question, and I'll do my best to help!",
+            )
             self.thinking_label.update("Ready")
             self.info_status.update("Status: idle")
             self._update_context_info()
+            return
+        if cmd == "/skills":
+            self._add_item("user", command)
+            skills = self._get_skill_suggestions()
+            if skills:
+                self._show_suggestions(skills)
+            else:
+                msg = "No skills found. Add skill files to ~/.coding-agent/skills/"
+                self._add_item("assistant", msg)
+            self.input.focus()
             return
         if cmd == "/help":
             self._add_item("user", command)
             help_text = (
                 "Available commands:\n"
+                "  /skills - List available skills\n"
                 "  /exit   - Exit the application\n"
                 "  /quit   - Exit the application\n"
                 "  /q      - Exit the application\n"
@@ -623,7 +665,7 @@ class CodingAgentApp(App):
         self._add_item("error", f"Unknown command: '{command}'. Type /help for available commands.")
 
     def on_input_changed(self, event: Input.Changed) -> None:
-        value = event.value
+        value = event.value.strip()
         if value.startswith("/"):
             if value in self.SUGGESTION_COMMANDS:
                 self._hide_suggestions()
@@ -641,7 +683,10 @@ class CodingAgentApp(App):
         sv = self.query_one("#suggestion-list", ListView)
         sv.clear()
         for cmd in commands:
-            sv.append(ListItem(Label(cmd)))
+            label = Label(cmd)
+            label.styles.color = "#cdd6f4"
+            label.styles.padding = 0
+            sv.append(ListItem(label))
         if sv.children:
             sv.index = 0
         sv.styles.display = "block"
@@ -675,8 +720,17 @@ class CodingAgentApp(App):
         sv = self.query_one("#suggestion-list", ListView)
         if sv.index is not None and sv.index < len(self._suggestion_commands):
             cmd = self._suggestion_commands[sv.index]
-            self.input.value = cmd
-            self.input.cursor_position = len(cmd)
+            if not cmd.startswith("/"):
+                m = re.search(r'\[#89b4fa\]([\w-]+)\[/#89b4fa\]', cmd)
+                if m:
+                    self.input.value = m.group(1) + " "
+                    self.input.cursor_position = len(m.group(1)) + 1
+                else:
+                    self.input.value = cmd
+                    self.input.cursor_position = len(cmd)
+            else:
+                self.input.value = cmd
+                self.input.cursor_position = len(cmd)
         self._hide_suggestions()
 
     # ── Message send / process ──
@@ -685,11 +739,30 @@ class CodingAgentApp(App):
         text = self.input.value.strip()
         if not text or self.is_processing:
             return
+
+        first_word = text.split()[0] if text.split() else ""
+        skill_content = None
+        try:
+            reg = self.agent.memory.skill_registry
+            if reg and first_word:
+                skill = reg._skills.get(first_word)
+                if skill is not None:
+                    skill_content = skill["content"]
+        except Exception:
+            pass
+
+        final_text = text
+        if skill_content:
+            rest = text[len(first_word) :].strip() if len(first_word) < len(text) else ""
+            final_text = f"[Attached Skill: {first_word}]\n```skill\n{skill_content}\n```\n\n{rest}"
+
+        self._add_item("user", text)
+        self.textual_ui_adapter._user_msg_shown = True
         self.input.value = ""
         self.thinking_label.update("🤔 Thinking...")
         self.info_status.update("Status: streaming")
         self.is_processing = True
-        self.run_worker(self.process_agent_response(text))
+        self.run_worker(self.process_agent_response(final_text))
 
     async def process_agent_response(self, user_text: str) -> None:
         try:
@@ -711,10 +784,10 @@ class CodingAgentApp(App):
 
 
 ITEM_MAP: dict[str, tuple[str, str]] = {
-    "user":        ("user-bubble",        "message-user"),
-    "assistant":   ("assistant-bubble",   "message-assistant"),
-    "tool":        ("tool-bubble",        "message-tool"),
+    "user": ("user-bubble", "message-user"),
+    "assistant": ("assistant-bubble", "message-assistant"),
+    "tool": ("tool-bubble", "message-tool"),
     "tool-result": ("tool-result-bubble", "message-tool-result"),
-    "tool-error":  ("tool-error-bubble",  "message-tool-error"),
-    "error":       ("error-bubble",       "message-error"),
+    "tool-error": ("tool-error-bubble", "message-tool-error"),
+    "error": ("error-bubble", "message-error"),
 }

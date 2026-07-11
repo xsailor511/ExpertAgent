@@ -104,6 +104,7 @@ class Agent:
         tool_pool = ToolPool(registry=tools)
         # Re-register connect_mcp with the pool reference
         from coding_agent.tools.mcp_connect_tool import ConnectMCPTool
+
         tools.register(ConnectMCPTool(pool=tool_pool))
 
         memory = Memory(
@@ -124,9 +125,7 @@ class Agent:
             bg_manager=bg_manager,
             cron_scheduler=cron_scheduler,
         )
-        agent.hooks.register(
-            HookEvent.PRE_TOOL_USE, build_permission_hook(permissions)
-        )
+        agent.hooks.register(HookEvent.PRE_TOOL_USE, build_permission_hook(permissions))
         return agent
 
     async def run(self, user_input: str) -> str:
