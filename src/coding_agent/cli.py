@@ -104,12 +104,29 @@ def init() -> None:
     else:
         rprint(f"[dim]-- [yellow]{dest}[/] 已存在，跳过[/]")
 
+    # MCP example config (always refresh so users get the latest sample)
+    mcp_example = (
+        importlib.resources.files("coding_agent").joinpath("mcp.example.json").read_bytes()
+    )
+    example_dest = config_dir / "mcp.example.json"
+    example_dest.write_bytes(mcp_example)
+    rprint(f"[bold green]OK[/] 已创建 [yellow]{example_dest}[/]")
+
+    # MCP config (user-level, highest priority). Empty by default.
+    mcp_dest = config_dir / "mcp.json"
+    if not mcp_dest.exists():
+        mcp_dest.write_text('{\n  "mcpServers": {}\n}\n', encoding="utf-8")
+        rprint(f"[bold green]OK[/] 已创建 [yellow]{mcp_dest}[/]")
+    else:
+        rprint(f"[dim]-- [yellow]{mcp_dest}[/] 已存在，跳过[/]")
+
     rprint(f"[bold green]OK[/] 已创建 [yellow]{config_dir}[/] 目录")
     rprint()
     rprint("[bold]下一步：[/]")
     rprint(f"  1. [cyan]cp {config_dir / '.env.example'} {config_dir / '.env'}[/]")
     rprint(f"  2. [cyan]编辑 {config_dir / '.env'}[/]，填入你的 API Key 等配置")
-    rprint("  3. 运行 [bold]coding-agent[/] 启动 TUI")
+    rprint(f"  3. [cyan]编辑 {mcp_dest}[/]，按需添加 MCP 服务器（参考 {example_dest}）")
+    rprint("  4. 运行 [bold]coding-agent[/] 启动 TUI")
 
 
 mcp_app = typer.Typer(help="管理 MCP 服务器连接。")
@@ -124,7 +141,7 @@ def mcp_list() -> None:
     servers = list(agent.tools._mcp_clients.keys()) if hasattr(agent.tools, "_mcp_clients") else []
     if not servers:
         rprint("[yellow]没有已连接的 MCP 服务器。[/]")
-        rprint("提示：在项目根目录创建 [bold].opencode/mcp.json[/] 来配置 MCP 服务器。")
+        rprint("提示：编辑 [bold]~/.coding-agent/mcp.json[/] 或项目根目录 [bold]mcp.json[/] 配置。")
         return
 
     rprint("[bold green]已连接的 MCP 服务器:[/]")
@@ -138,16 +155,25 @@ def mcp_config() -> None:
     """显示当前 MCP 配置文件路径与内容摘要。"""
     from pathlib import Path
 
-    from coding_agent.tools.mcp.config import find_mcp_config, load_mcp_config
+    from coding_agent.tools.mcp.config import (
+        MCP_CONFIG_USER,
+        find_mcp_config,
+        load_mcp_config,
+    )
+
+    rprint(f"[dim]用户级配置 (优先): {MCP_CONFIG_USER}[/]")
+    rprint("[dim]项目级配置: .opencode/mcp.json 或 mcp.json[/]")
+    rprint()
 
     path = find_mcp_config(Path("."))
     if not path:
         rprint("[yellow]未找到 MCP 配置文件。[/]")
-        rprint("可创建 [bold].opencode/mcp.json[/] 并参考 .opencode/mcp.json.example")
+        example = MCP_CONFIG_USER.with_name("mcp.example.json")
+        rprint(f"可创建 [bold]{MCP_CONFIG_USER}[/] 并参考 [bold]{example}[/]")
         return
 
     config = load_mcp_config(path)
-    rprint(f"[bold green]配置文件:[/] {path}")
+    rprint(f"[bold green]生效配置文件:[/] {path}")
     if not config.servers:
         rprint("  (无服务器配置)")
         return

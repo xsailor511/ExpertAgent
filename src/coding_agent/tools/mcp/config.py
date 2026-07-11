@@ -10,7 +10,10 @@ from pydantic import BaseModel, Field
 
 log = logging.getLogger(__name__)
 
-# Default MCP config search paths (project-level first)
+# User-level MCP config (highest priority, shared across projects)
+MCP_CONFIG_USER = Path.home() / ".coding-agent" / "mcp.json"
+
+# Project-level MCP config candidates (searched relative to workdir)
 MCP_CONFIG_CANDIDATES = [
     Path(".opencode/mcp.json"),
     Path("mcp.json"),
@@ -63,10 +66,17 @@ def load_mcp_config(path: Path) -> MCPConfig:
 
 
 def find_mcp_config(workdir: Path) -> Path | None:
-    """Search for mcp.json in the workdir using the candidate relative paths.
+    """Search for mcp.json and return the first existing path.
 
-    Returns the first that exists, or None.
+    Priority:
+        1. User-level ``~/.coding-agent/mcp.json`` (shared across projects)
+        2. Project candidates relative to ``workdir`` (.opencode/mcp.json, mcp.json)
+
+    Returns None if no config exists.
     """
+    if MCP_CONFIG_USER.exists():
+        log.info("Found user-level MCP config at %s", MCP_CONFIG_USER)
+        return MCP_CONFIG_USER
     for candidate in MCP_CONFIG_CANDIDATES:
         resolved = workdir / candidate
         if resolved.exists():

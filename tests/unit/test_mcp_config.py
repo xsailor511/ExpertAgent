@@ -5,8 +5,12 @@ from __future__ import annotations
 import json
 import tempfile
 from pathlib import Path
+from unittest.mock import patch
 
-from coding_agent.tools.mcp.config import load_mcp_config
+from coding_agent.tools.mcp.config import (
+    find_mcp_config,
+    load_mcp_config,
+)
 
 
 def test_load_mcp_config_valid():
@@ -58,3 +62,58 @@ def test_load_mcp_config_invalid_json():
         f.flush()
         config = load_mcp_config(Path(f.name))
     assert config.servers == {}
+
+
+def test_find_mcp_config_user_level_priority():
+    """User-level ~/.coding-agent/mcp.json wins over project candidates."""
+    import tempfile
+    from pathlib import Path
+
+    with tempfile.TemporaryDirectory() as tmp:
+        user_cfg = Path(tmp) / "user_mcp.json"
+        user_cfg.write_text('{"mcpServers": {"a": {"command": "x"}}}', encoding="utf-8")
+        project_dir = Path(tmp) / "proj"
+        project_dir.mkdir()
+        (project_dir / "mcp.json").write_text(
+            '{"mcpServers": {"b": {"command": "y"}}}', encoding="utf-8"
+        )
+        with patch(
+            "coding_agent.tools.mcp.config.MCP_CONFIG_USER", user_cfg
+        ):
+            found = find_mcp_config(project_dir)
+        assert found == user_cfg
+
+
+def test_find_mcp_config_falls_back_to_project():
+    """Without user-level config, project candidate is used."""
+    import tempfile
+    from pathlib import Path
+
+    with tempfile.TemporaryDirectory() as tmp:
+        project_dir = Path(tmp) / "proj"
+        project_dir.mkdir()
+        (project_dir / "mcp.json").write_text(
+            '{"mcpServers": {"b": {"command": "y"}}}', encoding="utf-8"
+        )
+        with patch(
+            "coding_agent.tools.mcp.config.MCP_CONFIG_USER",
+            Path(tmp) / "nonexistent.json",
+        ):
+            found = find_mcp_config(project_dir)
+        assert found == project_dir / "mcp.json"
+
+
+def test_find_mcp_config_none_when_absent():
+    """Returns None when neither user nor project config exists."""
+    import tempfile
+    from pathlib import Path
+
+    with tempfile.TemporaryDirectory() as tmp:
+        project_dir = Path(tmp) / "proj"
+        project_dir.mkdir()
+        with patch(
+            "coding_agent.tools.mcp.config.MCP_CONFIG_USER",
+            Path(tmp) / "nonexistent.json",
+        ):
+            found = find_mcp_config(project_dir)
+        assert found is None
