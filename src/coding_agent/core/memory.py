@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -68,7 +68,7 @@ class Memory:
         sections = [self._base_prompt.strip()]
         if self.workdir:
             sections.append(f"工作目录：{self.workdir}")
-        sections.append(f"当前时间：{datetime.now(UTC).isoformat(timespec='seconds')}")
+        sections.append(f"当前时间：{datetime.now().isoformat(timespec='seconds')}")
 
         # Skills catalog
         if self.skill_registry:

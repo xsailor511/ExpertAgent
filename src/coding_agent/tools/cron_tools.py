@@ -12,14 +12,15 @@ class CronScheduleTool(Tool):
     name: ClassVar[str] = "schedule_cron"
     description: ClassVar[str] = (
         "Schedule a cron job. cron is 5-field: minute hour day-of-month month day-of-week. "
-        "For one-shot reminders, compute the target minute and set recurring=false."
+        "For one-shot reminders (e.g. 'remind me in 3 minutes'), set recurring=false "
+        "and the job auto-deletes after first fire."
     )
     requires_confirmation: ClassVar[bool] = False
 
     class Params(BaseModel):
         cron: str = Field(..., description="5-field cron expression (min hour dom month dow)")
         prompt: str = Field(..., description="Prompt to inject when the cron fires")
-        recurring: bool = Field(True, description="Whether to repeat after firing")
+        recurring: bool = Field(True, description="If false, auto-deletes after first fire")
         durable: bool = Field(True, description="Whether to persist across sessions")
 
     def __init__(self, cron_scheduler: CronScheduler) -> None:
@@ -28,7 +29,6 @@ class CronScheduleTool(Tool):
     async def execute(
         self, cron: str, prompt: str, recurring: bool = True, durable: bool = True
     ) -> ToolResult:
-        # Validate cron expression
         try:
             fields = cron.strip().split()
             if len(fields) != 5:
@@ -66,6 +66,7 @@ class CronScheduleTool(Tool):
             expr=cron,
             prompt=prompt,
             enabled=True,
+            oneshot=not recurring,
         )
         self.cron.add(job)
         return ToolResult(
@@ -92,7 +93,8 @@ class CronListTool(Tool):
         lines = []
         for j in jobs:
             status = "enabled" if j.enabled else "disabled"
-            lines.append(f"  {j.id}: '{j.expr}' -> {j.prompt[:40]} [{status}]")
+            mode = "oneshot" if j.oneshot else "recurring"
+            lines.append(f"  {j.id}: '{j.expr}' -> {j.prompt[:40]} [{status}, {mode}]")
         return ToolResult(content="\n".join(lines))
 
 

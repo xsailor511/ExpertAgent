@@ -71,13 +71,14 @@ class CronJob:
     prompt: str
     enabled: bool = True
     last_fired: float | None = None
+    oneshot: bool = False
 
     def should_fire(self, dt: datetime | None = None) -> bool:
         if not self.enabled:
             return False
         dt = dt or datetime.now()
         now_ts = dt.timestamp()
-        if self.last_fired is not None and now_ts - self.last_fired < 30:
+        if self.last_fired is not None and now_ts - self.last_fired < 60:
             return False
         return match_cron(self.expr, dt)
 
@@ -88,6 +89,7 @@ class CronJob:
             "prompt": self.prompt,
             "enabled": self.enabled,
             "last_fired": self.last_fired,
+            "oneshot": self.oneshot,
         }
 
 
@@ -147,12 +149,20 @@ class CronScheduler:
     def _run_loop(self) -> None:
         while self._running:
             now = datetime.now()
+            dirty = False
             with self._lock:
-                for job in self._jobs.values():
+                to_delete: list[str] = []
+                for job in list(self._jobs.values()):
                     if job.should_fire(now):
                         job.last_fired = now.timestamp()
                         self._fired.append(f"[Cron {job.id}] {job.prompt}")
-                        self._save()
+                        dirty = True
+                        if job.oneshot:
+                            to_delete.append(job.id)
+                for job_id in to_delete:
+                    del self._jobs[job_id]
+                if dirty:
+                    self._save()
             time.sleep(1)
 
     def _save(self) -> None:

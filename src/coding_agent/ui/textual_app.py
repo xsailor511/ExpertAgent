@@ -48,9 +48,7 @@ def _summarize_args(name: str, arguments: dict[str, Any]) -> str:
 
 
 def _summarize_result(name: str, result: str) -> str:
-    if len(result) <= 300:
-        return result
-    return result[:300] + f"\n... ({len(result)} chars total)"
+    return result
 
 
 class TextualUIAdapter(TerminalUI):
@@ -483,11 +481,22 @@ class CodingAgentApp(App):
 
     # ── Multi-type list items ──
 
+    @staticmethod
+    def _truncate_lines(text: str, max_lines: int = 5) -> str:
+        """Truncate text to max_lines of content, adding a hint for overflow."""
+        lines = text.split("\n")
+        if len(lines) <= max_lines:
+            return text
+        extra = len(lines) - max_lines
+        return "\n".join(lines[:max_lines]) + f"\n... (更多{extra}行)"
+
     def _add_item(self, kind: str, text: str) -> None:
         """Add an item of a given kind to the chat list.
 
         kind ∈ {user, assistant, tool, tool-result, tool-error, error}
         """
+        if kind not in ("user", "assistant"):
+            text = self._truncate_lines(text)
         entry = ITEM_MAP.get(kind)
         if entry is None:
             bubble = Static(text, classes="assistant-bubble")
