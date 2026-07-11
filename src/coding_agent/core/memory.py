@@ -80,7 +80,11 @@ class Memory:
         # MCP servers
         mcp = self.context.get("mcp_servers", [])
         if mcp:
-            sections.append(f"已连接 MCP 服务器：{', '.join(mcp)}")
+            sections.append(
+                f"已连接 MCP 服务器：{', '.join(mcp)}\n"
+                "使用 mcp__{server}__{tool_name} 格式调用 MCP 工具。\n"
+                "运行 'coding-agent mcp list' 查看详情。"
+            )
 
         # Active teammates
         teammates = self.context.get("active_teammates", [])
