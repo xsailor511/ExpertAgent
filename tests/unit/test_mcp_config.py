@@ -6,7 +6,7 @@ import json
 import tempfile
 from pathlib import Path
 
-from coding_agent.tools.mcp.config import MCPConfig, load_mcp_config
+from coding_agent.tools.mcp.config import load_mcp_config
 
 
 def test_load_mcp_config_valid():
