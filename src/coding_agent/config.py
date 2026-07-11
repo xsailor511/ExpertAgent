@@ -12,8 +12,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class PermissionMode(str, Enum):
     """权限模式。"""
 
-    ASK = "ask"        # 每次操作前询问
-    AUTO = "auto"      # 自动批准 (危险)
+    ASK = "ask"  # 每次操作前询问
+    AUTO = "auto"  # 自动批准 (危险)
     READONLY = "readonly"  # 只读
 
 
@@ -30,7 +30,6 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(
         env_prefix="CODING_AGENT_",
-        env_file=".env",
         env_file_encoding="utf-8",
         extra="ignore",
     )
@@ -73,11 +72,22 @@ class Settings(BaseSettings):
 _settings: Settings | None = None
 
 
-def get_settings() -> Settings:
+def _resolve_env_file(env_file: str | Path | None = None) -> str | Path | None:
+    """解析 .env 文件路径（仅 ~/.coding-agent/.env）。"""
+    if env_file is not None:
+        return env_file
+    home_env = Path.home() / ".coding-agent" / ".env"
+    if home_env.exists():
+        return home_env
+    return None
+
+
+def get_settings(env_file: str | Path | None = None) -> Settings:
     """获取全局配置单例。"""
     global _settings
     if _settings is None:
-        _settings = Settings()
+        resolved = _resolve_env_file(env_file)
+        _settings = Settings(_env_file=resolved)  # type: ignore
     return _settings
 
 

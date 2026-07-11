@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import importlib.resources
 from pathlib import Path
 
 import typer
@@ -15,27 +16,40 @@ app = typer.Typer(
     help="一个基于 Python 的编码智能体。",
     no_args_is_help=False,
     add_completion=False,
+    pretty_exceptions_enable=False,
 )
 
 
-@app.command()
-def chat(
+_ENV_PATH = Path.home() / ".coding-agent" / ".env"
+
+
+def _require_env() -> None:
+    """检查 ~/.coding-agent/.env 是否存在，不存在则提示 init。"""
+    if not _ENV_PATH.exists():
+        rprint("[red]错误：[/] 未找到配置文件 ~/.coding-agent/.env")
+        rprint("请先执行 [bold]coding-agent init[/] 初始化应用")
+        raise typer.Exit(code=1)
+
+
+@app.callback(invoke_without_command=True)
+def main(
+    ctx: typer.Context,
     message: str | None = typer.Option(
         None, "-m", "--message", help="单次执行模式：直接传入消息，不进入交互"
     ),
     model: str | None = typer.Option(None, "--model", help="覆盖默认模型"),
     workdir: Path | None = typer.Option(None, "--workdir", "-C", help="工作目录"),
-    permission: PermissionMode | None = typer.Option(
-        None, "--permission", "-p", help="权限模式"
-    ),
+    permission: PermissionMode | None = typer.Option(None, "--permission", "-p", help="权限模式"),
     sandbox: SandboxType | None = typer.Option(None, "--sandbox", help="沙箱类型"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="详细日志"),
-    textual: bool = typer.Option(False, "--textual", "-t", help="使用现代 Textual TUI 界面"),
 ) -> None:
     """启动 coding agent。"""
-    settings = get_settings()
+    if ctx.invoked_subcommand is not None:
+        return
 
-    # 命令行参数覆盖配置
+    _require_env()
+    settings = get_settings(env_file=_ENV_PATH)
+
     if model:
         settings.model = model
     if workdir:
@@ -45,29 +59,10 @@ def chat(
     if sandbox:
         settings.sandbox = sandbox
 
-    rprint("[bold cyan]coding-agent[/] v0.1.0")
-    rprint(f"  模型:      [yellow]{settings.model}[/]")
-    rprint(f"  工作目录:    [yellow]{settings.workdir}[/]")
-    rprint(f"  权限模式: [yellow]{settings.permission.value}[/]")
-    rprint(f"  沙箱类型:    [yellow]{settings.sandbox.value}[/]")
-    if textual:
-        rprint("  TUI界面:        [green]textual (现代)[/]")
+    if message:
+        asyncio.run(_run_once(message))
     else:
-        rprint("  TUI界面:        [dim]rich (传统)[/]")
-    rprint()
-
-    try:
-        if message:
-            # 单次模式
-            asyncio.run(_run_once(message))
-        elif textual:
-            # Textual TUI 模式
-            _run_textual_tui(settings)
-        else:
-            # 交互模式
-            asyncio.run(_run_interactive())
-    except KeyboardInterrupt:
-        rprint("\n[dim]再见 👋[/]")
+        _run_textual_tui(settings)
 
 
 async def _run_once(message: str) -> None:
@@ -83,10 +78,7 @@ def _run_textual_tui(settings) -> None:
     from coding_agent.core.agent import Agent
     from coding_agent.ui.textual_app import CodingAgentApp
 
-    # 使用配置创建智能体
     agent = Agent.from_settings(settings)
-
-    # 运行 Textual TUI 应用
     app_instance = CodingAgentApp(agent=agent)
     try:
         app_instance.run()
@@ -96,46 +88,28 @@ def _run_textual_tui(settings) -> None:
         asyncio.run(agent.close())
 
 
-async def _run_interactive() -> None:
-    from coding_agent.core.agent import Agent
-    from coding_agent.ui.input import InputHandler
+@app.command()
+def init() -> None:
+    """初始化 ~/.coding-agent 配置目录。"""
+    config_dir = Path.home() / ".coding-agent"
+    config_dir.mkdir(parents=True, exist_ok=True)
 
-    agent = Agent.from_settings()
-    input_handler = InputHandler()
+    example_content = (
+        importlib.resources.files("coding_agent").joinpath(".env.example").read_bytes()
+    )
+    dest = config_dir / ".env.example"
+    if not dest.exists():
+        dest.write_bytes(example_content)
+        rprint(f"[bold green]OK[/] 已创建 [yellow]{dest}[/]")
+    else:
+        rprint(f"[dim]-- [yellow]{dest}[/] 已存在，跳过[/]")
 
-    rprint("[dim]输入你的需求，Ctrl+C 退出。输入 /help 查看命令[/]\n")
-
-    while True:
-        try:
-            user_input = await input_handler.read()
-            if not user_input.strip():
-                continue
-
-            # 内置命令
-            if user_input.strip() == "/help":
-                _print_help()
-                continue
-            if user_input.strip() in ("/exit", "/quit", "/q"):
-                break
-            if user_input.strip() == "/clear":
-                agent.clear_history()
-                rprint("[dim]历史已清空[/]\n")
-                continue
-
-            await agent.run(user_input)
-        except (KeyboardInterrupt, EOFError):
-            break
-
-    await agent.close()
-    rprint("[dim]再见 👋[/]")
-
-
-def _print_help() -> None:
-    rprint("\n[bold]命令:[/]")
-    rprint("  [cyan]/help[/]    显示帮助")
-    rprint("  [cyan]/clear[/]  清空对话历史")
-    rprint("  [cyan]/exit[/], /quit[/], /q   退出")
+    rprint(f"[bold green]OK[/] 已创建 [yellow]{config_dir}[/] 目录")
     rprint()
+    rprint("[bold]下一步：[/]")
+    rprint(f"  1. [cyan]cp {config_dir / '.env.example'} {config_dir / '.env'}[/]")
+    rprint(f"  2. [cyan]编辑 {config_dir / '.env'}[/]，填入你的 API Key 等配置")
+    rprint("  3. 运行 [bold]coding-agent[/] 启动 TUI")
 
 
 if __name__ == "__main__":
