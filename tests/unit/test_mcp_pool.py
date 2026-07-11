@@ -78,3 +78,26 @@ def test_mcp_invalid_name_format(registry: ToolRegistry):
 
     result = asyncio.run(pool.execute("mcp__incomplete", {}))
     assert result.is_error
+
+
+def test_connect_from_config_success(registry: ToolRegistry):
+    """connect_from_config silently drops servers that fail."""
+    from coding_agent.tools.mcp.config import MCPConfig, MCPServerConfig
+
+    pool = ToolPool(registry)
+    config = MCPConfig(servers={
+        "filesystem": MCPServerConfig(
+            command="echo", args=["{}"],
+        ),
+    })
+    pool.connect_from_config(config)
+    assert "filesystem" not in pool._mcp_clients
+
+
+def test_connect_from_config_empty(registry: ToolRegistry):
+    """Empty config does nothing."""
+    from coding_agent.tools.mcp.config import MCPConfig
+
+    pool = ToolPool(registry)
+    pool.connect_from_config(MCPConfig())
+    assert pool._mcp_clients == {}

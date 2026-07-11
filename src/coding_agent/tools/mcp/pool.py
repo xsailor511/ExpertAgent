@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from coding_agent.tools.base import ToolResult
 from coding_agent.tools.mcp.client import MCPClient
+from coding_agent.tools.mcp.config import MCPConfig
 from coding_agent.tools.registry import ToolRegistry
 
 
@@ -26,6 +28,28 @@ class ToolPool:
         tools = client.discover_tools()
         for t in tools:
             self._mcp_tools[t["name"]] = t
+
+    def connect_from_config(self, config: MCPConfig) -> None:
+        """Connect to all MCP servers defined in config.
+
+        Failed connections are silently dropped (logged as warnings).
+        """
+        log = logging.getLogger(__name__)
+        for name, server_cfg in config.servers.items():
+            if name in self._mcp_clients:
+                log.warning("MCP server '%s' already connected, skipping", name)
+                continue
+            try:
+                client = MCPClient(
+                    server_name=name,
+                    command=[server_cfg.command] + server_cfg.args,
+                    env=server_cfg.env,
+                )
+                client.connect()
+                self.register_mcp(name, client)
+                log.info("Connected to MCP server '%s'", name)
+            except Exception as e:
+                log.warning("Failed to connect MCP server '%s': %s", name, e)
 
     def get(self, name: str) -> Any | None:
         """Look up a tool by name (builtin or MCP)."""
