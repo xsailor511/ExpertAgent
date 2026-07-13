@@ -61,19 +61,14 @@ class PermissionPolicy:
         description: str,
     ) -> bool:
         """向用户确认。"""
-        # 构造提示
         args_str = json.dumps(arguments, ensure_ascii=False, indent=2)
-        prompt = (
-            f"\n[bold yellow]⚠ {tool_name}[/] 想要运行:\n"
-            f"[dim]{args_str}[/]\n"
-            f"是否允许？"
-        )
-        self.ui.console.print(prompt)
-        # 同步确认 (在交互场景下可接受)
+        prompt = f"⚠ {tool_name} 想要运行:\n{args_str}\n"
+        # use print_warning (TUI-safe, overridden by TextualUIAdapter)
+        self.ui.print_warning(prompt)
         import anyio
 
         approved = await anyio.to_thread.run_sync(
-            lambda: self.ui.confirm("执行?", default=False)
+            lambda: self.ui.confirm("允许执行?", default=False)
         )
         if approved:
             log.info(f"用户已批准 {tool_name}")

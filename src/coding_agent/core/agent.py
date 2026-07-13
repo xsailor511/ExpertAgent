@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 from coding_agent.config import Settings, get_settings
 from coding_agent.core.background import BackgroundTaskManager
@@ -47,6 +48,7 @@ class Agent:
         permissions: PermissionPolicy,
         bg_manager: BackgroundTaskManager | None = None,
         cron_scheduler: CronScheduler | None = None,
+        coordinator: Any = None,
     ) -> None:
         self.settings = settings
         self.llm = llm
@@ -57,6 +59,7 @@ class Agent:
         self.permissions = permissions
         self.bg_manager = bg_manager
         self.cron = cron_scheduler
+        self.coordinator = coordinator
         self.hooks = HookRegistry()
         self.hooks.register(HookEvent.PRE_TOOL_USE, build_log_hook(log))
         self.recovery_state = RecoveryState(primary=settings.model)
@@ -70,13 +73,14 @@ class Agent:
             recovery_state=self.recovery_state,
             bg_manager=self.bg_manager,
             cron_scheduler=self.cron,
+            coordinator=coordinator,
         )
 
     @classmethod
-    def from_settings(cls, settings: Settings | None = None) -> Agent:
+    def from_settings(cls, settings: Settings | None = None, ui: TerminalUI | None = None) -> Agent:
         """从配置创建 Agent。"""
         settings = settings or get_settings()
-        setup_logging(settings.log_level)
+        setup_logging(settings.log_level, log_file=settings.log_file)
 
         llm = create_llm(settings=settings)
         skill_registry = SkillRegistry()
@@ -84,7 +88,8 @@ class Agent:
 
         # Infrastructure
         session = Session(workdir=settings.workdir)
-        ui = TerminalUI()
+        if ui is None:
+            ui = TerminalUI()
         permissions = PermissionPolicy(mode=settings.permission, ui=ui)
         bg_manager = BackgroundTaskManager()
         cron_scheduler = CronScheduler()
@@ -100,6 +105,7 @@ class Agent:
             cron_scheduler=cron_scheduler,
             worktree_manager=worktree_manager,
             team_coordinator=coordinator,
+            ui=ui,
         )
         # ToolPool wraps ToolRegistry and adds MCP tool support
         tool_pool = ToolPool(registry=tools)
@@ -114,6 +120,7 @@ class Agent:
             skill_registry=skill_registry,
             workdir=settings.workdir,
         )
+        coordinator._memory = memory
 
         # Auto-connect MCP servers from mcp.json config (failures are dropped)
         mcp_config_path = find_mcp_config(Path(settings.workdir))
@@ -135,6 +142,15 @@ class Agent:
         )
         agent.hooks.register(HookEvent.PRE_TOOL_USE, build_permission_hook(permissions))
         return agent
+
+    def set_ui(self, ui: TerminalUI) -> None:
+        """Replace the UI reference and propagate to loop, permissions, and all tools."""
+        self.ui = ui
+        if self.loop:
+            self.loop.ui = ui
+        self.permissions.ui = ui
+        if hasattr(self.tools, "set_ui"):
+            self.tools.set_ui(ui)
 
     async def run(self, user_input: str) -> str:
         """执行一轮对话。"""

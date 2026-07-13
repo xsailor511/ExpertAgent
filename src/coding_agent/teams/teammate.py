@@ -5,12 +5,14 @@ from __future__ import annotations
 import asyncio
 import concurrent.futures
 import threading
+import time
 from typing import Any
 
 from coding_agent.llm.base import LLMProvider, LLMResponse, Message
 from coding_agent.tasks.graph import TaskGraph
 from coding_agent.tasks.store import TaskStore
 from coding_agent.teams.bus import MessageBus
+from coding_agent.teams.coordinator import TeamCoordinator
 from coding_agent.teams.protocol import ProtocolState
 from coding_agent.tools.base import ToolResult
 from coding_agent.tools.registry import ToolRegistry
@@ -45,6 +47,7 @@ class Teammate:
         task_store: TaskStore,
         task_graph: TaskGraph,
         bus: MessageBus,
+        coordinator: TeamCoordinator | None = None,
         idle_poll_interval: float = 5.0,
     ) -> None:
         self.agent_id = agent_id
@@ -53,6 +56,7 @@ class Teammate:
         self.task_store = task_store
         self.task_graph = task_graph
         self.bus = bus
+        self.coordinator = coordinator
         self.protocol = ProtocolState(agent_id, bus)
         self.idle_poll_interval = idle_poll_interval
         self._running = False
@@ -64,6 +68,8 @@ class Teammate:
             return
         self._running = True
         self._wake_event.clear()
+        if self.coordinator:
+            self.coordinator.register_teammate(self.agent_id)
         self._thread = threading.Thread(target=self._run_loop, daemon=True)
         self._thread.start()
         log.info(f"Teammate '{self.agent_id}' started")
@@ -113,15 +119,31 @@ class Teammate:
             return
 
         try:
-            self._work_on_task(task.subject)
+            result = self._work_on_task(task.subject)
             task.status = "completed"
             self.task_store.save(task)
             log.info(f"Teammate '{self.agent_id}' completed task: {task.subject}")
+            if self.coordinator:
+                self.coordinator.bus.send("lead", {
+                    "type": "result",
+                    "from": self.agent_id,
+                    "content": result or f"[队友 {self.agent_id} 完成] {task.subject}",
+                    "ts": time.time(),
+                })
+                self.coordinator.unregister_teammate(self.agent_id)
         except Exception:
             log.exception(f"Teammate '{self.agent_id}' failed task: {task.subject}")
             task.status = "pending"
             task.owner = None
             self.task_store.save(task)
+            if self.coordinator:
+                self.coordinator.bus.send("lead", {
+                    "type": "result",
+                    "from": self.agent_id,
+                    "content": f"[队友 {self.agent_id} 执行失败] {task.subject}",
+                    "ts": time.time(),
+                })
+                self.coordinator.unregister_teammate(self.agent_id)
 
     def _work_on_task(self, prompt: str) -> str:
         """Execute one LLM call session to work on a task."""

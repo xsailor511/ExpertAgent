@@ -10,7 +10,10 @@ from coding_agent.tools.base import Tool, ToolResult
 
 class GlobTool(Tool):
     name: ClassVar[str] = "glob"
-    description: ClassVar[str] = "Find files matching a glob pattern (e.g. **/*.py)."
+    description: ClassVar[str] = (
+        "Search for files in the workspace directory using a glob pattern (e.g. **/*.py). "
+        "For skill scripts, use load_skill which shows their absolute paths."
+    )
 
     class Params(BaseModel):
         pattern: str = Field(..., description="Glob pattern to search for")

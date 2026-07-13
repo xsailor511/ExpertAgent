@@ -12,7 +12,7 @@ dependencies = [
     # === LLM 调用层 ===
     "openai>=1.50.0",
     "anthropic>=0.39.0",
-    "litellm>=1.50.0",
+    "litellm==1.91.2",
     "tiktoken>=0.7.0",
     # === Agent 编排 / 数据校验 ===
     "pydantic>=2.9.0",

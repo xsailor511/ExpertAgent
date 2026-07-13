@@ -10,10 +10,13 @@ from coding_agent.teams.bus import MessageBus
 class TeamCoordinator:
     """Central coordinator for multi-agent protocol state and teammate registry."""
 
-    def __init__(self, bus: MessageBus) -> None:
+    def __init__(self, bus: MessageBus, memory: Any = None) -> None:
         self.bus = bus
         self._pending_requests: dict[str, dict[str, Any]] = {}
         self._active_teammates: dict[str, bool] = {}
+        # 已派生但结果尚未被主队友收取的队友 (解决"快速完成"竞态)
+        self._pending_result_teammates: set[str] = set()
+        self._memory = memory
 
     # --- Request API ---
 
@@ -79,6 +82,8 @@ class TeamCoordinator:
                 self._match_response(req_id, msg.get("approve", False))
                 actions.append(msg)
             elif msg_type in ("shutdown_response", "result"):
+                if msg_type == "result":
+                    self._pending_result_teammates.discard(msg.get("from", ""))
                 actions.append(msg)
             else:
                 actions.append(msg)
@@ -97,9 +102,21 @@ class TeamCoordinator:
 
     def register_teammate(self, name: str) -> None:
         self._active_teammates[name] = True
+        self._pending_result_teammates.add(name)
+        self._sync_memory()
 
     def unregister_teammate(self, name: str) -> None:
         self._active_teammates.pop(name, None)
+        self._sync_memory()
+
+    def has_pending_results(self) -> bool:
+        """是否有已派生队友的结果尚未被主队友收取。"""
+        return bool(self._pending_result_teammates)
+
+    def _sync_memory(self) -> None:
+        if self._memory is not None:
+            self._memory.context["active_teammates"] = self.get_active_teammates()
+            self._memory.refresh_system_prompt()
 
     def get_active_teammates(self) -> list[str]:
         return list(self._active_teammates.keys())

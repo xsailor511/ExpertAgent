@@ -127,6 +127,49 @@ class TerminalUI:
             )
         )
 
+    # === SubAgent 可视化（轻量日志模式）===
+
+    def print_subagent_start(self, description: str) -> None:
+        self.console.print(
+            Panel(
+                Text(description, style="bold"),
+                title="[bold magenta]🔄 SubAgent[/]",
+                border_style="magenta",
+            )
+        )
+
+    def print_subagent_milestone(self, msg: str) -> None:
+        self.console.print(f"  [dim]· {msg}[/]")
+
+    def print_subagent_end(self, summary: str) -> None:
+        if not summary:
+            summary = "(no output)"
+        self.console.print(
+            Panel(
+                Text(summary, style="green"),
+                title="[bold green]✅ SubAgent 完成[/]",
+                border_style="green",
+            )
+        )
+
+    # === Teammate 可视化（事件驱动）===
+
+    def print_teammate_progress(self, name: str, msg: str) -> None:
+        self.console.print(f"  [dim gold3][{name}] {msg}[/]")
+
+    def print_teammate_complete(self, name: str, msg: str) -> None:
+        self.console.print(
+            Panel(
+                Text(msg, style="bold"),
+                title=f"[bold gold3]✅ {name}[/]",
+                border_style="gold3",
+            )
+        )
+
+    # 保留旧别名保证向后兼容
+    def print_teammate_event(self, name: str, msg: str) -> None:
+        self.print_teammate_complete(name, msg)
+
     # === 通用消息 ===
 
     def print_info(self, msg: str) -> None:

@@ -37,6 +37,7 @@ class SkillRegistry:
                     "name": name,
                     "description": desc,
                     "content": raw,
+                    "path": str(directory),
                 }
 
     def list_skill_dicts(self) -> list[dict[str, Any]]:
@@ -55,6 +56,34 @@ class SkillRegistry:
     def load_skill(self, name: str) -> str | None:
         skill = self._skills.get(name)
         return skill["content"] if skill else None
+
+    def get_enriched_content(self, name: str) -> str | None:
+        skill = self._skills.get(name)
+        if skill is None:
+            return None
+        content = skill["content"]
+        skill_path = skill.get("path", "")
+        if skill_path:
+            content += f"\n\nSkill directory:\n{skill_path}"
+            scripts_dir = Path(skill_path) / "scripts"
+            if scripts_dir.is_dir():
+                script_files = sorted(
+                    str(p.relative_to(Path(skill_path)))
+                    for p in scripts_dir.rglob("*.py")
+                )
+                if script_files:
+                    content += "\n\nAvailable scripts:\n"
+                    content += "\n".join(f"  {f}" for f in script_files)
+            else:
+                all_files = sorted(
+                    str(p.relative_to(Path(skill_path)))
+                    for p in Path(skill_path).rglob("*")
+                    if p.is_file() and p.name != "SKILL.md" and "__pycache__" not in p.parts
+                )
+                if all_files:
+                    content += "\n\nSkill files:\n"
+                    content += "\n".join(f"  {f}" for f in all_files)
+        return content
 
     def inject_catalog(self, system_prompt: str) -> str:
         catalog = self.list_skills()

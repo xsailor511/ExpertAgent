@@ -23,7 +23,7 @@ class LoadSkillTool(Tool):
         self.registry = registry
 
     async def execute(self, name: str) -> ToolResult:
-        content = self.registry.load_skill(name)
+        content = self.registry.get_enriched_content(name)
         if content is None:
             return ToolResult(
                 content=f"Skill '{name}' not found. Available: {self.registry.available_skills()}",

@@ -13,6 +13,10 @@ from pydantic import BaseModel, Field
 from coding_agent.llm.base import LLMProvider, LLMResponse, Message
 from coding_agent.teams.coordinator import TeamCoordinator
 from coding_agent.tools.base import Tool, ToolResult
+from coding_agent.ui.terminal import TerminalUI
+from coding_agent.utils.logging import get_logger
+
+log = get_logger(__name__)
 
 IDLE_POLL_INTERVAL = 5
 IDLE_TIMEOUT = 5
@@ -23,21 +27,27 @@ def _input_schema(required: list[str], **props: Any) -> dict[str, Any]:
 
 
 SUB_TOOL_DEFS = [
-    {"name": "bash", "description": "Run a shell command.",
-     "input_schema": _input_schema(["command"], command={"type": "string"})},
-    {"name": "read_file", "description": "Read file.",
-     "input_schema": _input_schema(["path"],
-         path={"type": "string"}, limit={"type": "integer"}, offset={"type": "integer"})},
-    {"name": "write_file", "description": "Write file.",
-     "input_schema": _input_schema(["path", "content"],
-         path={"type": "string"}, content={"type": "string"})},
-    {"name": "edit_file", "description": "Edit file.",
-     "input_schema": _input_schema(["path", "old_text", "new_text"],
-         path={"type": "string"}, old_text={"type": "string"}, new_text={"type": "string"})},
-    {"name": "send_message", "description": "Send message to lead.",
-     "input_schema": _input_schema(["content"], content={"type": "string"})},
-    {"name": "submit_plan", "description": "Submit a plan for lead approval.",
-     "input_schema": _input_schema(["plan"], plan={"type": "string"})},
+    {"type": "function", "function": {
+        "name": "bash", "description": "Run a shell command.",
+        "parameters": _input_schema(["command"], command={"type": "string"})}},
+    {"type": "function", "function": {
+        "name": "read_file", "description": "Read file.",
+        "parameters": _input_schema(["path"],
+            path={"type": "string"}, limit={"type": "integer"}, offset={"type": "integer"})}},
+    {"type": "function", "function": {
+        "name": "write_file", "description": "Write file.",
+        "parameters": _input_schema(["path", "content"],
+            path={"type": "string"}, content={"type": "string"})}},
+    {"type": "function", "function": {
+        "name": "edit_file", "description": "Edit file.",
+        "parameters": _input_schema(["path", "old_text", "new_text"],
+            path={"type": "string"}, old_text={"type": "string"}, new_text={"type": "string"})}},
+    {"type": "function", "function": {
+        "name": "send_message", "description": "Send message to lead.",
+        "parameters": _input_schema(["content"], content={"type": "string"})}},
+    {"type": "function", "function": {
+        "name": "submit_plan", "description": "Submit a plan for lead approval.",
+        "parameters": _input_schema(["plan"], plan={"type": "string"})}},
 ]
 
 
@@ -51,10 +61,17 @@ class SpawnTeammateTool(Tool):
         role: str = Field(..., description="Role description (e.g. 'frontend developer')")
         prompt: str = Field(..., description="Initial task prompt for the teammate")
 
-    def __init__(self, llm: LLMProvider, coordinator: TeamCoordinator, workdir: Path) -> None:
+    def __init__(
+        self, llm: LLMProvider, coordinator: TeamCoordinator, workdir: Path,
+        ui: TerminalUI | None = None,
+    ) -> None:
         self.llm = llm
         self.coordinator = coordinator
         self.workdir = Path(workdir)
+        self.ui = ui
+
+    def set_ui(self, ui: TerminalUI) -> None:
+        self.ui = ui
 
     async def execute(self, name: str, role: str, prompt: str) -> ToolResult:
         if self.coordinator.is_teammate_active(name):
@@ -63,6 +80,10 @@ class SpawnTeammateTool(Tool):
         llm = self.llm
         coordinator = self.coordinator
         workdir = self.workdir
+        ui = self.ui
+
+        if ui:
+            ui.print_teammate_progress(name, f"开始工作: {prompt[:80]}...")
 
         def _run():
             messages: list[dict[str, Any]] = [{"role": "user", "content": prompt}]
@@ -86,7 +107,10 @@ class SpawnTeammateTool(Tool):
             waiting_plan: str | None = None
 
             while True:
-                if _check_shutdown(coordinator, name, messages, waiting_plan, lambda: None):
+                should_break, waiting_plan = _check_shutdown(
+                    coordinator, name, messages, waiting_plan, lambda: None,
+                )
+                if should_break:
                     break
 
                 if waiting_plan:
@@ -111,15 +135,25 @@ class SpawnTeammateTool(Tool):
 
                 try:
                     response = _llm_call()
-                except Exception:
-                    break
+                except Exception as e:
+                    log.error("Teammate '%s' LLM call failed: %s", name, e)
+                    if ui:
+                        ui.print_teammate_progress(name, f"LLM 调用失败: {e}")
+                    coordinator.bus.send("lead", {
+                        "type": "result", "from": name,
+                        "content": f"[队友 {name} 执行失败] LLM 调用异常: {e}",
+                    })
+                    coordinator.unregister_teammate(name)
+                    return
 
                 tool_calls = _get_tool_calls(response)
                 if not tool_calls:
+                    log.info("Teammate '%s' finished (no tool calls)", name)
                     break
 
                 content = response.content or "" if isinstance(response, LLMResponse) else ""
-                msgs_content = []
+
+                tool_outputs: list[tuple[str, str, str]] = []
                 for tc in tool_calls:
                     handler = sub_handlers.get(tc.name)
                     if handler:
@@ -129,15 +163,21 @@ class SpawnTeammateTool(Tool):
                             output = f"Error: {e}"
                     else:
                         output = f"Unknown tool: {tc.name}"
-                    msgs_content.append({
-                        "type": "tool_result",
-                        "tool_use_id": tc.id,
-                        "content": str(output),
-                    })
+                    tool_outputs.append((tc.id, tc.name, str(output)))
                     if tc.name == "submit_plan":
                         match = re.search(r"\((req_\d+)\)", str(output))
                         if match:
                             waiting_plan = match.group(1)
+                            if ui:
+                                ui.print_teammate_progress(
+                                    name, f"提交计划审阅: {match.group(1)}"
+                                )
+                    elif tc.name == "bash" and ui:
+                        brief = tc.arguments.get("command", "")[:60]
+                        ui.print_teammate_progress(name, f"bash: {brief}")
+                    elif tc.name == "write_file" and ui:
+                        brief = tc.arguments.get("path", "")
+                        ui.print_teammate_progress(name, f"写入文件: {brief}")
 
                 messages.append({
                     "role": "assistant",
@@ -148,29 +188,52 @@ class SpawnTeammateTool(Tool):
                         for tc in tool_calls
                     ],
                 })
-                messages.append({"role": "user", "content": msgs_content})
+                for tc_id, tc_name, tc_output in tool_outputs:
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tc_id,
+                        "content": tc_output,
+                        "name": tc_name,
+                    })
 
                 if waiting_plan:
                     continue
 
-                # Idle poll for tasks
                 if _idle_poll(coordinator, name, messages):
-                    break
+                    log.info("Teammate '%s' idle timeout", name)
+                    coordinator.bus.send("lead", {
+                        "type": "result", "from": name,
+                        "content": f"[队友 {name} 执行超时] 长时间无新消息，已自行结束。",
+                    })
+                    coordinator.unregister_teammate(name)
+                    return
 
+            # Capture last assistant message as result
+            result_content = "Teammate finished."
+            for m in reversed(messages):
+                if m.get("role") == "assistant" and m.get("content"):
+                    result_content = m["content"]
+                    break
+            # Send result to lead's inbox (consumed by the lead's loop)
+            log.info("队友 '%s' 发送结果到 lead 邮箱 (%d 字符)", name, len(result_content))
             coordinator.bus.send("lead", {
-                "type": "result", "from": name, "content": "Teammate finished.",
+                "type": "result", "from": name, "content": result_content,
             })
             coordinator.unregister_teammate(name)
+            if ui:
+                ui.print_teammate_complete(name, result_content[:200])
 
         coordinator.register_teammate(name)
         threading.Thread(target=_run, daemon=True).start()
-        return ToolResult(content=f"Teammate '{name}' spawned as {role}")
+        return ToolResult(
+            content=f"Teammate '{name}' spawned as {role} — 任务已随创建参数传入，无需再发送消息。"
+        )
 
 
 def _check_shutdown(
     coordinator: TeamCoordinator, name: str, messages: list,
     waiting_plan: str | None, _after: Any,
-) -> bool:
+) -> tuple[bool, str | None]:
     inbox = coordinator.bus.read(name)
     for msg in inbox:
         if msg.get("type") == "shutdown_request":
@@ -178,17 +241,17 @@ def _check_shutdown(
                 "type": "shutdown_response", "from": name,
                 "request_id": msg.get("request_id", ""),
             })
-            return True
+            return True, waiting_plan
         if (msg.get("type") == "plan_approval_response"
                 and waiting_plan
                 and msg.get("request_id") == waiting_plan):
-            waiting_plan = None
             status = "approved" if msg.get("approve") else "rejected"
             messages.append({
                 "role": "user",
                 "content": f"[Plan {status}] {msg.get('content', '')}",
             })
-    return False
+            return False, None
+    return False, waiting_plan
 
 
 def _idle_poll(coordinator: TeamCoordinator, name: str, messages: list) -> bool:

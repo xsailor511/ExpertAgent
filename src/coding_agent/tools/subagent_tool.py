@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 
 from coding_agent.llm.base import LLMProvider, LLMResponse, Message
 from coding_agent.tools.base import Tool, ToolResult
+from coding_agent.ui.terminal import TerminalUI
 
 
 class SubagentTool(Tool):
@@ -20,11 +21,17 @@ class SubagentTool(Tool):
     class Params(BaseModel):
         description: str = Field(..., description="Task description for the subagent")
 
-    def __init__(self, llm: LLMProvider, workdir: Path) -> None:
+    def __init__(self, llm: LLMProvider, workdir: Path, ui: TerminalUI | None = None) -> None:
         self.llm = llm
         self.workdir = Path(workdir)
+        self.ui = ui
+
+    def set_ui(self, ui: TerminalUI) -> None:
+        self.ui = ui
 
     async def execute(self, description: str) -> ToolResult:
+        if self.ui:
+            self.ui.print_subagent_start(description)
         messages: list[dict[str, Any]] = [
             {
                 "role": "system",
@@ -103,7 +110,7 @@ class SubagentTool(Tool):
         }
 
         max_iterations = 30
-        for _ in range(max_iterations):
+        for i in range(max_iterations):
             # Convert to Message objects for LLM call
             msg_objects = []
             for m in messages:
@@ -124,7 +131,13 @@ class SubagentTool(Tool):
             tool_calls = response.tool_calls or []
 
             if not tool_calls:
-                return ToolResult(content=content or "(no output)")
+                summary = content or "(no output)"
+                if self.ui:
+                    self.ui.print_subagent_end(summary)
+                return ToolResult(content=summary)
+
+            if self.ui and i > 0 and i % 3 == 0:
+                self.ui.print_subagent_milestone(f"进度: {i}/{max_iterations} 轮")
 
             messages.append({
                 "role": "assistant",
@@ -152,6 +165,8 @@ class SubagentTool(Tool):
                     "name": tc.name,
                 })
 
+        if self.ui:
+            self.ui.print_subagent_end("Subagent finished(no text summary)")
         return ToolResult(content="Subagent finished without a text summary.")
 
     def _run_bash(self, command: str) -> str:

@@ -16,6 +16,12 @@ class ToolRegistry:
     def __init__(self) -> None:
         self._tools: dict[str, Tool] = {}
 
+    def set_ui(self, ui: Any) -> None:
+        """Propagate UI reference to all tools that support it."""
+        for tool in self._tools.values():
+            if hasattr(tool, "set_ui"):
+                tool.set_ui(ui)
+
     def register(self, tool: Tool) -> None:
         """注册工具。"""
         if tool.name in self._tools:
@@ -85,6 +91,7 @@ def create_default_registry(
     worktree_manager: Any = None,
     team_coordinator: Any = None,
     tool_pool: Any = None,
+    ui: Any = None,
 ) -> ToolRegistry:
     """创建默认工具集 (包含所有内置工具)。"""
     from coding_agent.skills.registry import SkillRegistry
@@ -154,7 +161,7 @@ def create_default_registry(
 
     # Subagent
     if llm:
-        registry.register(SubagentTool(llm=llm, workdir=workdir))
+        registry.register(SubagentTool(llm=llm, workdir=workdir, ui=ui))
 
     # Cron tools
     if cron_scheduler:
@@ -172,7 +179,7 @@ def create_default_registry(
     if team_coordinator:
         if llm:
             registry.register(SpawnTeammateTool(
-                llm=llm, coordinator=team_coordinator, workdir=workdir,
+                llm=llm, coordinator=team_coordinator, workdir=workdir, ui=ui,
             ))
         registry.register(SendMessageTool(coordinator=team_coordinator))
         registry.register(CheckInboxTool(coordinator=team_coordinator))

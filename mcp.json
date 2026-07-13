@@ -1,5 +1,11 @@
 {
   "mcpServers": {
+    "worldbank-mcp": {
+      "command": "npx",
+      "args": [
+        "worldbank-mcp"
+      ]
+    },
     "bing-cn-mcp": {
       "command": "npx",
       "args": [

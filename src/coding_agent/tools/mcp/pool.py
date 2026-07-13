@@ -145,6 +145,10 @@ class ToolPool:
             )
         return await self.registry.execute(name, arguments, **kwargs)
 
+    def set_ui(self, ui: Any) -> None:
+        """Propagate UI reference to builtin tools."""
+        self.registry.set_ui(ui)
+
     def close(self) -> None:
         """Close all MCP clients."""
         with self._mcp_lock:

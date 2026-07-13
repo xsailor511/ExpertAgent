@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import Any
 
@@ -51,6 +52,7 @@ class AgentLoop:
         escalated_max_tokens: int = 16000,
         bg_manager: BackgroundTaskManager | None = None,
         cron_scheduler: CronScheduler | None = None,
+        coordinator: Any = None,
     ) -> None:
         self.llm = llm
         self.tools = tools
@@ -63,6 +65,7 @@ class AgentLoop:
         self.escalated_max_tokens = escalated_max_tokens
         self.bg_manager = bg_manager
         self.cron = cron_scheduler
+        self.coordinator = coordinator
 
     async def run(self, user_input: str) -> str:
         """执行一轮完整对话。"""
@@ -78,7 +81,9 @@ class AgentLoop:
         final_response = ""
         rounds_since_todo = 0
 
-        for _iteration in range(MAX_TOOL_ITERATIONS):
+        _iteration = 0
+        while _iteration < MAX_TOOL_ITERATIONS:
+            _iteration += 1
             # === Pre-LLM: inject scheduled / background / reminders ===
 
             # Cron queue injection
@@ -148,6 +153,32 @@ class AgentLoop:
 
             # 8. 如果没有工具调用, 说明 LLM 给出了最终回答
             if not response.tool_calls:
+                # 若有队友仍在运行或结果尚未收取, 阻塞轮询直至全部完成, 收集结果供总结
+                # 参考 code.py: 以"邮箱是否有消息"为准, 不单独依赖 active 瞬时状态,
+                # 队友先发结果再注销, 结果消息会晚于注销 —— 故用 pending 集(pending 仅在
+                # 结果被主队友 consume 时才清除) 与 active 共同判定, 形成闭环。
+                if self.coordinator and (
+                    self.coordinator.has_pending_results()
+                    or self.coordinator.get_active_teammates()
+                ):
+                    collected = await self._await_teammates()
+                    if collected:
+                        for m in collected:
+                            fr = m.get("from", "?")
+                            mtype = m.get("type", "result")
+                            content = m.get("content", "")
+                            log.info("Lead 收到队友 %s 的结果 (%d 字符)", fr, len(content))
+                            self.ui.print_info(f"收到队友 {fr} 的结果")
+                            self.ui.print_teammate_event(fr, f"已返回结果（{len(content)} 字）")
+                            self.ui.print_tool_result(f"teammate:{fr}", content)
+                            self.memory.add_user(
+                                f"[队友 {fr} 的{mtype}]\n{content}"
+                            )
+                        self.memory.add_user(
+                            "所有队友已完成。请汇总各队友的执行结果，"
+                            "总结每个任务是成功还是失败，并给出最终结论。"
+                        )
+                        continue
                 await self.hooks.trigger(HookEvent.STOP)
                 final_response = response.content
                 break
@@ -178,6 +209,25 @@ class AgentLoop:
                     break
                 await self._execute_tool_call(tc)
 
+            # 10b. 每轮工具调用后检查队友收件箱: 若所有队友皆已完成, 提前注入结果
+            #     让 lead 可以及时汇总, 无需等到自己"无工具调用"才处理。
+            if self.coordinator:
+                drained = self.coordinator.consume_lead_inbox()
+                results = [m for m in drained if m.get("type") == "result"]
+                no_pending = not self.coordinator.has_pending_results()
+                no_active = not self.coordinator.get_active_teammates()
+                if results and no_pending and no_active:
+                    for m in results:
+                        fr = m.get("from", "?")
+                        content = m.get("content", "")
+                        self.ui.print_info(f"队友 {fr} 已完成（提前汇总）")
+                        self.memory.add_user(f"[队友 {fr} 的结果]\n{content}")
+                    self.memory.add_user(
+                        "所有队友已完成。请汇总各队友的执行结果，"
+                        "总结每个任务是成功还是失败，并给出最终结论。"
+                    )
+                    continue
+
             # todo tracking
             if not compacted:
                 has_todo = any(tc.name == "todo_write" for tc in response.tool_calls)
@@ -186,11 +236,80 @@ class AgentLoop:
                 rounds_since_todo = 0
 
         else:
-            # 超过最大迭代
-            final_response = "达到最大工具调用次数，未找到最终答案。"
-            self.ui.print_warning(final_response)
+            # 超过最大迭代: 若仍有队友在运行或结果未收取, 先等待收集再总结,
+            # 避免主 lead 在队友完成前就草草收场 (闭环保证)。
+            if self.coordinator and (
+                self.coordinator.has_pending_results()
+                or self.coordinator.get_active_teammates()
+            ):
+                collected = await self._await_teammates()
+                if collected:
+                    for m in collected:
+                        fr = m.get("from", "?")
+                        content = m.get("content", "")
+                        self.ui.print_teammate_event(fr, f"已返回结果（{len(content)} 字）")
+                        self.ui.print_tool_result(f"teammate:{fr}", content)
+                        self.memory.add_user(
+                            f"[队友 {fr} 的{m.get('type', 'result')}]\n{content}"
+                        )
+                    self.memory.add_user(
+                        "已达迭代上限，但队友结果已就绪。请基于以下结果给出最终总结。"
+                    )
+                    # 再给一轮 LLM 调用做总结
+                    self.memory.refresh_system_prompt()
+                    self.ui.start_assistant_stream()
+
+                    _tools = tool_schemas
+                    _mtokens = max_tokens
+
+                    async def _final_stream(_t: Any = _tools, _m: int = _mtokens):
+                        agg = StreamAggregator()
+                        async for chunk in self.llm.stream(
+                            messages=self.memory.messages,
+                            tools=_t,
+                            max_tokens=_m,
+                        ):
+                            if chunk.content:
+                                self.ui.update_assistant_stream(chunk.content)
+                            agg.add(chunk)
+                        return agg.finalize()
+
+                    fr_resp = await with_retry(_final_stream, state=self.recovery_state)
+                    self.ui.end_assistant_stream()
+                    final_response = fr_resp.content
+                else:
+                    final_response = "达到最大工具调用次数，且未收到队友结果。"
+                    self.ui.print_warning(final_response)
+            else:
+                final_response = "达到最大工具调用次数，未找到最终答案。"
+                self.ui.print_warning(final_response)
 
         return final_response
+
+    # ── Teammate wait handler ──
+
+    async def _await_teammates(self, timeout: float = 600.0) -> list[dict[str, Any]]:
+        """阻塞轮询, 等待所有已派生队友的结果到达并收集 (闭环)。
+
+        终止条件: 既无待收结果(pending 集), 也无活跃队友(active)。前者仅在结果
+        被 consume 时清除, 后者在队友注销时清除 —— 二者都满足才说明闭环结束。
+        轮询期间非破坏性检查, 仅在结果到达时 consume, 避免 code.py 提到的
+        "结果晚于注销"竞态。
+        """
+        self.ui.print_info("等待队友完成任务...")
+        collected: list[dict[str, Any]] = []
+        elapsed = 0.0
+        while (
+            (self.coordinator.has_pending_results()
+             or self.coordinator.get_active_teammates())
+            and elapsed < timeout
+        ):
+            collected.extend(self.coordinator.consume_lead_inbox())
+            await asyncio.sleep(1.0)
+            elapsed += 1.0
+        # 最终 drain: 捕获边界情况下刚到达的结果
+        collected.extend(self.coordinator.consume_lead_inbox())
+        return collected
 
     # ── Compact handler ──
 
