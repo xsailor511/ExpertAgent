@@ -486,7 +486,24 @@ class CodingAgentApp(App):
         padding: 0 1;
     }
 
-
+    /* ── New-conversation divider ── */
+    .conversation-divider {
+        width: 100%;
+        height: auto;
+        layout: horizontal;
+    }
+    .divider-line {
+        width: 1fr;
+        color: #585b70;
+        text-style: dim;
+        height: 1;
+    }
+    .divider-text {
+        width: auto;
+        color: #585b70;
+        padding: 0 1;
+        text-style: dim;
+    }
 
     /* ── Input area ── */
     #input-area {
@@ -557,6 +574,7 @@ class CodingAgentApp(App):
             "/exit",
             "/quit",
             "/q",
+            "/new",
             "/clear",
             "/compact",
             "/help",
@@ -912,6 +930,25 @@ class CodingAgentApp(App):
             self.input.value = ""
             self.action_quit()
             return
+        if cmd == "/new":
+            self.input.value = ""
+            self.agent.memory.clear()
+            divider = Horizontal(
+                Static("─" * 500, classes="divider-line"),
+                Static(" 新对话 ", classes="divider-text"),
+                Static("─" * 500, classes="divider-line"),
+                classes="conversation-divider",
+            )
+            self.chat_container.mount(divider)
+            self.thinking_label.update("Ready")
+            self.info_status.update("Status: idle")
+            self._update_context_info()
+            try:
+                sv = self.query_one("#chat-area", ScrollableContainer)
+                sv.scroll_end(animate=False)
+            except Exception:
+                pass
+            return
         if cmd == "/clear":
             self._add_item("user", command)
             self.input.value = ""
@@ -957,6 +994,7 @@ class CodingAgentApp(App):
             self._add_item("user", command)
             help_text = (
                 "Available commands:\n"
+                "  /new    - Start new conversation (clear memory, keep chat visible)\n"
                 "  /mcp    - List MCP server connection status\n"
                 "  /skills - List available skills\n"
                 "  /exit   - Exit the application\n"
